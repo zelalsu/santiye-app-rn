@@ -1,98 +1,96 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import CostGrid from "@/components/CostGrid";
+import Header from "@/components/Header";
+import SearchBar from "@/components/SearchBar";
+import SummaryCard from "@/components/SummaryCard";
+import { COST_ITEMS } from "@/data/CostItems";
+import { auth, db } from "@/firebaseConfig";
+import { router, useLocalSearchParams } from "expo-router";
+import { signOut } from "firebase/auth";
+import { collection, onSnapshot } from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Dimensions, ScrollView } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const { width } = Dimensions.get("window");
+const COLUMN_WIDTH = (width - 48) / 2;
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const { projectId } = useLocalSearchParams<{ projectId: string }>();
+  const user = auth.currentUser;
+  const [search, setSearch] = useState("");
+  const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>(
+    {},
+  );
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  useEffect(() => {
+    if (!user || !projectId) return;
+
+    const unsub = onSnapshot(
+      collection(db, "users", user.uid, "projects", projectId, "categories"),
+      (snap) => {
+        const totals: Record<string, number> = {};
+        snap.docs.forEach((d) => {
+          totals[d.id] = d.data().total ?? 0;
+        });
+        setCategoryTotals(totals);
+      },
+    );
+
+    return unsub;
+  }, [projectId]);
+
+  const normalize = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/ı/g, "i")
+      .replace(/ğ/g, "g")
+      .replace(/ü/g, "u")
+      .replace(/ş/g, "s")
+      .replace(/ö/g, "o")
+      .replace(/ç/g, "c");
+
+  const filteredItems = useMemo(() => {
+    if (!search) return COST_ITEMS;
+    return COST_ITEMS.filter((item) =>
+      normalize(item.title).includes(normalize(search)),
+    );
+  }, [search]);
+
+  const grandTotal = Object.values(categoryTotals).reduce((a, b) => a + b, 0);
+  const handleLogout = () => {
+    Alert.alert("Çıkış Yap", "Hesabınızdan çıkmak istiyor musunuz?", [
+      { text: "İptal", style: "cancel" },
+      {
+        text: "Çıkış Yap",
+        style: "destructive",
+        onPress: async () => {
+          await signOut(auth);
+          router.replace("/(auth)");
+        },
+      },
+    ]);
+  };
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
+      <Header
+        title="Proje Maliyeti"
+        rightIcon="logout"
+        onRightIconPress={handleLogout}
+        leftMenuIcon
+      />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 50 }}
+      >
+        <SummaryCard projectId={projectId} total={grandTotal} />
+        <SearchBar value={search} onChange={setSearch} />
+        <CostGrid
+          items={filteredItems}
+          columnWidth={COLUMN_WIDTH}
+          categoryTotals={categoryTotals}
+          projectId={projectId}
+        />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
