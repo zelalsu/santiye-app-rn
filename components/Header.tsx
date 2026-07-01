@@ -6,14 +6,16 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 export default function Header({
   title,
+  subtitle,
   leftMenuIcon,
   backIcon,
   rightIcon,
   onRightIconPress,
 }: {
   title: string;
+  subtitle?: string;
   leftMenuIcon?: boolean;
-  backIcon?: string;
+  backIcon?: boolean;
   rightIcon?: string;
   onRightIconPress?: () => void;
 }) {
@@ -21,34 +23,47 @@ export default function Header({
 
   return (
     <View style={styles.header}>
-      {leftMenuIcon && (
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-          <MaterialCommunityIcons
-            name="format-align-left"
-            size={20}
-            color="#64748b"
-          />
-        </TouchableOpacity>
-      )}
-      {backIcon && (
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-          <MaterialCommunityIcons
-            name={backIcon as any}
-            size={20}
-            color="#64748b"
-          />
-        </TouchableOpacity>
-      )}
-      <Text style={styles.headerTitle}>{title}</Text>
-      {rightIcon && (
-        <TouchableOpacity onPress={onRightIconPress} style={styles.iconBtn}>
-          <MaterialCommunityIcons
-            name={rightIcon as any}
-            size={20}
-            color="#64748b"
-          />
-        </TouchableOpacity>
-      )}
+      <View style={styles.headerMain}>
+        {leftMenuIcon && (
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.iconBtn}
+          >
+            <MaterialCommunityIcons
+              name="office-building-plus-outline"
+              size={20}
+              color="#64748b"
+            />
+          </TouchableOpacity>
+        )}
+        {backIcon && (
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.iconBtn}
+          >
+            <MaterialCommunityIcons
+              name="arrow-left"
+              size={20}
+              color="#64748b"
+            />
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.headerMainText}>
+          <Text style={styles.headerMainSub}>Şantiyen Cebinde</Text>
+          <Text style={styles.headerMainTitle}>{title}</Text>
+          {subtitle && <Text style={styles.headerMainMeta}>{subtitle}</Text>}
+        </View>
+        {rightIcon && (
+          <TouchableOpacity onPress={onRightIconPress} style={styles.iconBtn}>
+            <MaterialCommunityIcons
+              name={rightIcon as any}
+              size={20}
+              color="#64748b"
+            />
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -58,7 +73,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+
     paddingVertical: 15,
   },
   headerTitle: {
@@ -68,14 +83,45 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   iconBtn: {
-    width: 42,
-    height: 42,
+    width: 35,
+    height: 35,
     borderRadius: 14,
     backgroundColor: COLORS.background,
     borderWidth: 1,
     borderColor: COLORS.border,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 4,
+  },
+  headerMain: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    gap: 12,
+  },
+  headerMainText: {
+    flex: 1,
+  },
+
+  headerMainSub: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: COLORS.primary,
+    letterSpacing: 1.4,
+    marginBottom: 2,
+  },
+  headerMainTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  headerMainMeta: {
+    fontSize: 12,
+    color: "#94A3B8",
+    marginTop: 2,
+    fontWeight: "500",
   },
 });

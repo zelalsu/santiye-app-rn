@@ -36,6 +36,15 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="(documents)"
+        options={{
+          title: "Belgeler",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="documents" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

@@ -35,7 +35,7 @@ export default function SummaryCard({
         <View style={styles.badge}>
           <Ionicons name="trending-up" size={13} color={COLORS.white} />
 
-          <Text style={styles.badgeText}> Güncel Portföy Özeti</Text>
+          <Text style={styles.badgeText}> Güncel Maliyet Özeti</Text>
         </View>
       </View>
 

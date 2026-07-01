@@ -4,6 +4,7 @@ import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { Project } from "@/types/projects";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import {
   addDoc,
@@ -127,7 +128,7 @@ export default function ProjectsScreen() {
         {/* Özet şerit */}
         <View style={styles.summaryStrip}>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryItemLabel}>Toplam Portföy</Text>
+            <Text style={styles.summaryItemLabel}>Toplam Maliyet</Text>
             <Text style={styles.summaryItemValue}>
               ₺{totalAll.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
             </Text>
@@ -175,7 +176,11 @@ export default function ProjectsScreen() {
             <ProjectCard
               item={item}
               index={index}
-              onPress={() => router.push(`/(tabs)?projectId=${item.id}`)}
+              onPress={async () => {
+                await AsyncStorage.setItem("activeProjectId", item.id);
+
+                router.push(`/(tabs)?projectId=${item.id}`);
+              }}
               onLongPress={() => handleDelete(item)}
             />
           )}

@@ -3,6 +3,7 @@ import PdfHistoryModal from "@/components/PdfHistoryModal";
 import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { copyAsync, documentDirectory } from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import { useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
@@ -18,6 +19,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +27,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 
 interface CategoryData {
   id: string;
@@ -40,101 +43,15 @@ export default function ProjectSummaryScreen() {
   const [projectName, setProjectName] = useState("");
   const [categories, setCategories] = useState<CategoryData[]>([]);
   const [historyVisible, setHistoryVisible] = useState(false);
-  // addDoc ve serverTimestamp import et
+  const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
+  const [pdfUri, setPdfUri] = useState<string | null>(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
 
-  // generateHtml — gerçek HTML dönsün
-  const generateHtml = () => `
-  <html>
-    <body style="font-family: Arial; padding: 24px; background: #F8FAFC;">
-      <div style="background: #2563EB; color: white; padding: 28px; border-radius: 20px; margin-bottom: 24px;">
-        <h1 style="margin:0; font-size: 30px;">${projectName}</h1>
-        <p style="margin-top: 8px; opacity: .9;">Proje Maliyet Özeti</p>
-        <h2 style="margin-top: 24px; font-size: 40px;">
-          ₺${totalCost.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
-        </h2>
-      </div>
+  // ─── Veri yükleme ────────────────────────────────────────────────────────────
 
-      <h2>Kategori Dağılımı</h2>
-      <table width="100%" cellspacing="0" cellpadding="10" style="border-collapse: collapse; margin-top: 12px;">
-        <tr style="background:#E5E7EB; text-align:left;">
-          <th>Kategori</th><th>Oran</th><th>Tutar</th>
-        </tr>
-        ${sortedCategories
-          .map((cat) => {
-            const percent = totalCost
-              ? ((cat.total / totalCost) * 100).toFixed(1)
-              : "0";
-            return `
-            <tr>
-              <td style="border-bottom:1px solid #E5E7EB;">${cat.id}</td>
-              <td style="border-bottom:1px solid #E5E7EB;">%${percent}</td>
-              <td style="border-bottom:1px solid #E5E7EB; font-weight:bold;">
-                ₺${cat.total.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
-              </td>
-            </tr>
-          `;
-          })
-          .join("")}
-      </table>
-
-      <h2 style="margin-top:32px;">En Yüksek Kalemler</h2>
-      <table width="100%" cellspacing="0" cellpadding="10" style="border-collapse: collapse; margin-top: 12px;">
-        <tr style="background:#E5E7EB; text-align:left;">
-          <th>Kalem</th><th>Kategori</th><th>Miktar</th><th>Etki</th><th>Tutar</th>
-        </tr>
-        ${topEntries
-          .map(
-            (item) => `
-          <tr>
-            <td style="border-bottom:1px solid #E5E7EB;">${item.label}</td>
-            <td style="border-bottom:1px solid #E5E7EB;">${item.category}</td>
-            <td style="border-bottom:1px solid #E5E7EB;">${item.quantity} ${item.unit}</td>
-            <td style="border-bottom:1px solid #E5E7EB; color:#2563EB; font-weight:bold;">
-              %${((item.total / totalCost) * 100).toFixed(1)}
-            </td>
-            <td style="border-bottom:1px solid #E5E7EB; font-weight:bold;">
-              ₺${item.total.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
-            </td>
-          </tr>
-        `,
-          )
-          .join("")}
-      </table>
-
-      <div style="margin-top:40px; color:#6B7280; font-size:12px;">
-        Oluşturulma Tarihi: ${new Date().toLocaleDateString("tr-TR")}
-      </div>
-    </body>
-  </html>
-`;
-  console.log(categories);
-  // handleExportPdf — addDoc ekle
-  const handleExportPdf = async () => {
-    if (categories.length === 0) {
-      Alert.alert("Veri Yok", "PDF oluşturmak için önce kalem ekleyin.");
-      return;
-    }
-    try {
-      const html = generateHtml();
-      const { uri } = await Print.printToFileAsync({ html });
-
-      // Firestore'a kaydet
-      await addDoc(
-        collection(db, "users", user!.uid, "projects", projectId, "pdfHistory"),
-        {
-          createdAt: serverTimestamp(),
-          totalCost,
-          projectName,
-        },
-      );
-
-      await Sharing.shareAsync(uri);
-    } catch (error) {
-      console.log(error);
-    }
-  };
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadData = async () => {
@@ -143,7 +60,6 @@ export default function ProjectSummaryScreen() {
 
       const projectRef = doc(db, "users", user.uid, "projects", projectId);
       const projectSnap = await getDoc(projectRef);
-
       if (projectSnap.exists()) {
         setProjectName(projectSnap.data()?.name ?? "Proje");
       }
@@ -160,36 +76,177 @@ export default function ProjectSummaryScreen() {
 
       setCategories(parsed);
     } catch (error) {
-      console.log(error);
+      console.error("loadData error:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const totalCost = useMemo(() => {
-    return categories.reduce((sum, c) => sum + c.total, 0);
-  }, [categories]);
+  // ─── Memoized hesaplamalar ────────────────────────────────────────────────────
 
-  const sortedCategories = useMemo(() => {
-    return [...categories].sort((a, b) => b.total - a.total);
-  }, [categories]);
+  const totalCost = useMemo(
+    () => categories.reduce((sum, c) => sum + c.total, 0),
+    [categories],
+  );
 
-  const topEntries = useMemo(() => {
-    return categories
-      .flatMap((c) =>
-        c.entries.map((entry) => {
-          const impactScore = entry.total * (entry.quantity || 1);
+  const sortedCategories = useMemo(
+    () => [...categories].sort((a, b) => b.total - a.total),
+    [categories],
+  );
 
-          return {
+  const topEntries = useMemo(
+    () =>
+      categories
+        .flatMap((c) =>
+          c.entries.map((entry) => ({
             ...entry,
             category: c.id,
-            impactScore,
-          };
-        }),
+            impactScore: entry.total * (entry.quantity || 1),
+          })),
+        )
+        .sort((a, b) => b.impactScore - a.impactScore)
+        .slice(0, 3),
+    [categories],
+  );
+
+  const allEntries = useMemo(
+    () =>
+      categories.flatMap((c) =>
+        c.entries.map((entry) => ({ ...entry, category: c.id })),
+      ),
+    [categories],
+  );
+
+  // ─── HTML şablonu ─────────────────────────────────────────────────────────────
+
+  const generateHtml = () => `
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; padding: 32px; background: #F8FAFC; color: #1F2937; }
+    .hero { background: #2563EB; color: white; padding: 28px; border-radius: 20px; margin-bottom: 24px; }
+    .hero h1 { font-size: 28px; }
+    .hero p { margin-top: 6px; opacity: .85; font-size: 14px; }
+    .hero .total { font-size: 38px; font-weight: 900; margin-top: 18px; }
+    .date { color: #6B7280; font-size: 12px; margin-bottom: 14px; }
+    h2 { font-size: 18px; font-weight: 700; margin: 24px 0 12px; color: #111827; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #E5E7EB; padding: 10px; text-align: left; }
+    td { padding: 10px; border-bottom: 1px solid #E5E7EB; }
+    .blue { color: #2563EB; font-weight: 700; }
+    .bold { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <p class="date">Oluşturulma Tarihi: ${new Date().toLocaleDateString("tr-TR")}</p>
+
+  <div class="hero">
+    <h1>${projectName}</h1>
+    <p>Proje Maliyet Özeti</p>
+    <div class="total">₺${totalCost.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</div>
+  </div>
+
+  <h2>Kategori Dağılımı</h2>
+  <table>
+    <tr><th>Kategori</th><th>Oran</th><th>Tutar</th></tr>
+    ${sortedCategories
+      .map((cat) => {
+        const pct = totalCost
+          ? ((cat.total / totalCost) * 100).toFixed(1)
+          : "0";
+        return `
+        <tr>
+          <td>${cat.id}</td>
+          <td>%${pct}</td>
+          <td class="bold">₺${cat.total.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
+        </tr>`;
+      })
+      .join("")}
+  </table>
+
+  <h2>Tüm Kalemler</h2>
+  <table>
+    <tr><th>Kalem</th><th>Kategori</th><th>Miktar</th><th>Etki</th><th>Tutar</th></tr>
+    ${allEntries
+      .map(
+        (item) => `
+      <tr>
+        <td>${item.label}</td>
+        <td>${item.category}</td>
+        <td>${item.quantity} ${item.unit}</td>
+        <td class="blue">%${totalCost ? ((item.total / totalCost) * 100).toFixed(1) : "0"}</td>
+        <td class="bold">₺${item.total.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
+      </tr>`,
       )
-      .sort((a, b) => b.impactScore - a.impactScore)
-      .slice(0, 3);
-  }, [categories]);
+      .join("")}
+  </table>
+</body>
+</html>`;
+
+  // ─── PDF oluştur → önizleme aç ───────────────────────────────────────────────
+
+  const handleGenerateAndPreview = async () => {
+    if (categories.length === 0) {
+      Alert.alert("Veri Yok", "PDF oluşturmak için önce kalem ekleyin.");
+      return;
+    }
+
+    try {
+      setPdfGenerating(true);
+      const html = generateHtml();
+
+      // expo-print ile geçici PDF oluştur
+      const { uri: tempUri } = await Print.printToFileAsync({ html });
+
+      // Kalıcı konuma kopyala (Documents klasörü — indirilebilir)
+      const fileName = `${projectName.replace(/\s+/g, "_")}_${Date.now()}.pdf`;
+      const permanentUri = documentDirectory + fileName;
+      await copyAsync({ from: tempUri, to: permanentUri });
+
+      // Firestore'a kaydet
+      await addDoc(
+        collection(db, "users", user!.uid, "projects", projectId, "pdfHistory"),
+        {
+          createdAt: serverTimestamp(),
+          totalCost,
+          projectName,
+          fileName,
+        },
+      );
+
+      setPdfUri(permanentUri);
+      setPdfPreviewVisible(true);
+    } catch (error) {
+      console.error("PDF hatası:", error);
+      Alert.alert("Hata", "PDF oluşturulurken bir sorun çıktı.");
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
+  // ─── Paylaş / İndir ──────────────────────────────────────────────────────────
+
+  const handleShare = async () => {
+    if (!pdfUri) return;
+    const available = await Sharing.isAvailableAsync();
+    if (!available) {
+      Alert.alert(
+        "Paylaşım desteklenmiyor",
+        "Bu cihazda paylaşım özelliği kullanılamıyor.",
+      );
+      return;
+    }
+    await Sharing.shareAsync(pdfUri, {
+      mimeType: "application/pdf",
+      dialogTitle: "PDF'i paylaş veya kaydet",
+    });
+  };
+
+  // ─── Yükleniyor ──────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -199,33 +256,119 @@ export default function ProjectSummaryScreen() {
     );
   }
 
+  // ─── Render ──────────────────────────────────────────────────────────────────
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
+
   return (
     <SafeAreaView style={styles.container}>
+      {/* Geçmiş PDF'ler */}
       <PdfHistoryModal
         visible={historyVisible}
         onClose={() => setHistoryVisible(false)}
         projectId={projectId}
         generateHtml={generateHtml}
       />
+
+      {/* ─── Uygulama içi PDF önizleme modal'ı ─── */}
+      <Modal
+        visible={pdfPreviewVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setPdfPreviewVisible(false)}
+      >
+        <View style={styles.previewRoot}>
+          {/* Status bar için spacing */}
+          <View style={styles.statusBarSpacer} />
+
+          {/* Üst bar - SafeArea içinde değil, manuel padding */}
+          <View style={styles.previewHeader}>
+            <TouchableOpacity
+              onPress={() => setPdfPreviewVisible(false)}
+              style={styles.previewHeaderBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialCommunityIcons
+                name="close"
+                size={24}
+                color={COLORS.primary}
+              />
+            </TouchableOpacity>
+
+            <Text style={styles.previewTitle}>PDF Önizleme</Text>
+
+            <TouchableOpacity
+              onPress={handleShare}
+              style={styles.previewHeaderBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialCommunityIcons
+                name="share-variant"
+                size={24}
+                color={COLORS.primary}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {/* PDF görüntüleyici */}
+          {pdfUri ? (
+            <WebView
+              source={{ uri: pdfUri }}
+              style={{ flex: 1 }}
+              originWhitelist={["*"]}
+            />
+          ) : (
+            <View style={styles.centerContent}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+            </View>
+          )}
+
+          {/* Alt buton */}
+          <View style={styles.previewFooter}>
+            <TouchableOpacity style={styles.downloadBtn} onPress={handleShare}>
+              <MaterialCommunityIcons name="download" size={20} color="#fff" />
+              <Text style={styles.downloadBtnText}>İndir / Paylaş</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── Ana header ─── */}
       <Header
         title="Maliyet Özeti"
-        backIcon="arrow-left"
+        backIcon
         rightIcon="file-pdf-box"
         onRightIconPress={() => setHistoryVisible(true)}
       />
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        <TouchableOpacity onPress={handleExportPdf} style={styles.exportBtn}>
-          <MaterialCommunityIcons name="file-pdf-box" size={20} color="#fff" />
-          <Text style={styles.exportBtnText}>PDF Oluştur</Text>
+        {/* PDF Oluştur butonu */}
+        <TouchableOpacity
+          onPress={handleGenerateAndPreview}
+          style={[styles.exportBtn, pdfGenerating && { opacity: 0.7 }]}
+          disabled={pdfGenerating}
+        >
+          {pdfGenerating ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <MaterialCommunityIcons
+              name="file-pdf-box"
+              size={20}
+              color="#fff"
+            />
+          )}
+          <Text style={styles.exportBtnText}>
+            {pdfGenerating ? "Oluşturuluyor..." : "PDF Oluştur & Önizle"}
+          </Text>
         </TouchableOpacity>
-        {/* KATEGORI DAGILIMI */}
+
+        {/* ─── KATEGORİ DAĞILIMI ─── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Kategori Dağılımı</Text>
-
-          {sortedCategories.map((item, index) => {
+          {sortedCategories.map((item) => {
             const percent = totalCost
               ? ((item.total / totalCost) * 100).toFixed(1)
               : "0";
@@ -250,9 +393,7 @@ export default function ProjectSummaryScreen() {
                   <View
                     style={[
                       styles.progressFill,
-                      {
-                        width: `${percent}%`,
-                      },
+                      { width: `${percent}%` as any },
                     ]}
                   />
                 </View>
@@ -261,7 +402,7 @@ export default function ProjectSummaryScreen() {
           })}
         </View>
 
-        {/* EN PAHALI KALEMLER */}
+        {/* ─── EN PAHALI KALEMLER ─── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Bütçeyi En Çok Etkileyenler</Text>
           {topEntries.length === 0 ? (
@@ -295,7 +436,7 @@ export default function ProjectSummaryScreen() {
           )}
         </View>
 
-        {/* TAHMIN */}
+        {/* ─── TOPLAM MALİYET ─── */}
         <View style={styles.predictionCard}>
           <MaterialCommunityIcons
             name="trending-up"
@@ -304,21 +445,14 @@ export default function ProjectSummaryScreen() {
           />
 
           <View style={{ flex: 1 }}>
-            <Text style={styles.predictionTitle}>Maliyet</Text>
-
+            <Text style={styles.predictionTitle}>Toplam Maliyet</Text>
             <Text style={styles.predictionSubtitle}>
-              Mevcut verilere göre toplam maliyetin değeri
+              Mevcut verilere göre toplam maliyet
             </Text>
           </View>
 
           <Text style={styles.predictionValue}>
-            ₺
-            {/* {(totalCost * 1.15).toLocaleString("tr-TR", {
-              minimumFractionDigits: 0,
-            })} */}
-            {totalCost.toLocaleString("tr-TR", {
-              minimumFractionDigits: 2,
-            })}
+            ₺{totalCost.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
           </Text>
         </View>
 
@@ -328,124 +462,98 @@ export default function ProjectSummaryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F5F7FB",
-  },
+// ─── Stiller ─────────────────────────────────────────────────────────────────
 
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F5F7FB" },
   loadingContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F5F7FB",
   },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 30 },
 
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 30,
+  // PDF Preview Modal - YENİ
+  previewRoot: {
+    flex: 1,
+    backgroundColor: "#fff",
   },
+  statusBarSpacer: {
+    height: 44, // Status bar yüksekliği (iPhone için 44, Android için 24-32)
+    backgroundColor: "#fff",
+  },
+  previewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+  previewHeaderBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+    backgroundColor: "#F3F4F6",
+  },
+  previewTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  previewFooter: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+    backgroundColor: "#fff",
+    paddingBottom: 24,
+  },
+  downloadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 16,
+    backgroundColor: COLORS.primary,
+    borderRadius: 14,
+  },
+  downloadBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Dışa aktar
   exportBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    margin: 20,
+    marginTop: 20,
+    marginBottom: 24,
     padding: 16,
     backgroundColor: COLORS.primary,
-    borderRadius: 18,
+    borderRadius: 14,
   },
   exportBtnText: {
     color: "#fff",
-    fontWeight: "700",
+    fontWeight: "600",
     fontSize: 15,
   },
 
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
-  },
-
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: COLORS.text,
-  },
-
-  iconBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
-    backgroundColor: COLORS.white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  heroCard: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 30,
-    padding: 24,
-    marginBottom: 22,
-  },
-
-  heroTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-  },
-
-  heroProject: {
-    fontSize: 16,
-    color: "rgba(255,255,255,0.7)",
-    marginBottom: 4,
-  },
-
-  heroLabel: {
-    fontSize: 14,
-    color: "rgba(255,255,255,0.9)",
-  },
-
-  heroIconBox: {
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  heroValue: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: COLORS.white,
-  },
-
-  heroStatsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 20,
-  },
-
-  heroStatBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.12)",
-  },
-
-  heroStatText: {
-    color: COLORS.white,
-    fontWeight: "600",
-    fontSize: 13,
-  },
-
-  section: {
-    marginBottom: 24,
-  },
-
+  // Bölümler
+  section: { marginBottom: 24 },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "800",
@@ -453,11 +561,17 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
 
+  // Kategori kartı
   categoryCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
 
   categoryTop: {
@@ -481,32 +595,38 @@ const styles = StyleSheet.create({
   },
 
   categoryPrice: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "800",
     color: COLORS.primary,
   },
 
   progressBg: {
-    height: 10,
+    height: 8,
     backgroundColor: "#EEF2FA",
-    borderRadius: 999,
+    borderRadius: 4,
     overflow: "hidden",
   },
 
   progressFill: {
-    height: 10,
+    height: 8,
     backgroundColor: COLORS.primary,
-    borderRadius: 999,
+    borderRadius: 4,
   },
 
+  // Kalem kartı
   entryCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
   },
 
   entryLeft: {
@@ -528,6 +648,7 @@ const styles = StyleSheet.create({
   entryIndexText: {
     color: COLORS.primary,
     fontWeight: "800",
+    fontSize: 14,
   },
 
   entryLabel: {
@@ -548,13 +669,19 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
 
+  // Tahmin kartı
   predictionCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 22,
+    borderRadius: 16,
     padding: 18,
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
 
   predictionTitle: {
@@ -575,14 +702,16 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
 
+  // Boş durum
   emptyBox: {
     backgroundColor: COLORS.white,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 24,
     alignItems: "center",
   },
 
   emptyText: {
     color: COLORS.textMuted,
+    fontSize: 14,
   },
 });

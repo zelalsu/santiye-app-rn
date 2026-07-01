@@ -3,7 +3,7 @@ import { COLORS } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { TouchableOpacity } from "react-native";
-import CategoryScreen from "./screens/CategoryScreen";
+import CategoryScreen from "./CategoryScreen";
 
 export default function CategoryPage() {
   const params = useLocalSearchParams<{ category?: string }>();

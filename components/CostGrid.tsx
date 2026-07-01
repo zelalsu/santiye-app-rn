@@ -44,7 +44,7 @@ export default function CostGrid({
             style={[styles.card, { width: columnWidth }]}
             onPress={() =>
               router.push({
-                pathname: "/[category]",
+                pathname: "/screens/[category]",
                 params: {
                   category: item.id,
                   projectId,
