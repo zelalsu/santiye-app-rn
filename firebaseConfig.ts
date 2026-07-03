@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { initializeApp } from "firebase/app";
+import { getAI, GoogleAIBackend } from "firebase/ai";
 import { getReactNativePersistence, initializeAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
@@ -24,4 +25,5 @@ export const auth = initializeAuth(app, {
 
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const ai = getAI(app, { backend: new GoogleAIBackend() });
 export default app;

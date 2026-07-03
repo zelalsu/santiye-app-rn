@@ -6,9 +6,9 @@ import { auth, db } from "@/firebaseConfig";
 import { PhaseInfo, PHASES_DATA } from "@/types/phases";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { collection, getDocs } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -44,9 +44,13 @@ export default function DocumentsScreen() {
     load();
   }, []);
 
-  useEffect(() => {
-    if (projectId && user) loadCounts();
-  }, [projectId]);
+  useFocusEffect(
+    useCallback(() => {
+      if (projectId && user) {
+        loadCounts();
+      }
+    }, [projectId, user]),
+  );
 
   const loadCounts = async () => {
     try {

@@ -7,6 +7,7 @@ import {
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
+import "../polyfills";
 
 export const unstable_settings = {
   anchor: "index",
