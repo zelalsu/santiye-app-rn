@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import ProjectCard from "@/components/ProjectCard";
+import SearchBar from "@/components/SearchBar";
 import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { Project } from "@/types/projects";
@@ -15,8 +16,9 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  updateDoc,
 } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -40,7 +42,9 @@ export default function ProjectsScreen() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [newName, setNewName] = useState("");
+  const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
   const router = useRouter();
 
   const headerFade = useRef(new Animated.Value(0)).current;
@@ -85,14 +89,46 @@ export default function ProjectsScreen() {
   const handleAdd = async () => {
     if (!newName.trim() || !user) return;
     setAdding(true);
-    await addDoc(collection(db, "users", user.uid, "projects"), {
-      name: newName.trim(),
-      createdAt: serverTimestamp(),
-      totalCost: 0,
-    });
+    try {
+      if (editingProject) {
+        await updateDoc(
+          doc(db, "users", user.uid, "projects", editingProject.id),
+          { name: newName.trim() },
+        );
+      } else {
+        await addDoc(collection(db, "users", user.uid, "projects"), {
+          name: newName.trim(),
+          createdAt: serverTimestamp(),
+          totalCost: 0,
+        });
+      }
+      setNewName("");
+      setEditingProject(null);
+      setModalVisible(false);
+    } catch {
+      Alert.alert("İşlem Başarısız", "Şantiye adı kaydedilemedi. Tekrar deneyin.");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const openCreateModal = () => {
+    setEditingProject(null);
     setNewName("");
-    setAdding(false);
+    setModalVisible(true);
+  };
+
+  const openRenameModal = (project: Project) => {
+    setEditingProject(project);
+    setNewName(project.name);
+    setModalVisible(true);
+  };
+
+  const closeModal = () => {
+    if (adding) return;
     setModalVisible(false);
+    setEditingProject(null);
+    setNewName("");
   };
 
   const handleDelete = (project: Project) => {
@@ -109,11 +145,31 @@ export default function ProjectsScreen() {
   };
 
   const totalAll = projects.reduce((s, p) => s + (p.totalCost ?? 0), 0);
+  const normalize = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/ı/g, "i")
+      .replace(/ğ/g, "g")
+      .replace(/ü/g, "u")
+      .replace(/ş/g, "s")
+      .replace(/ö/g, "o")
+      .replace(/ç/g, "c");
+
+  const filteredProjects = useMemo(() => {
+    const term = normalize(search.trim());
+    if (!term) return projects;
+
+    return projects.filter((project) => normalize(project.name).includes(term));
+  }, [projects, search]);
 
   return (
     <SafeAreaView style={styles.container}>
       {/* ── Header ── */}
-      <Header title="Şantiyeler" />
+      <Header
+        title="Şantiyeler"
+        rightIcon="account-cog-outline"
+        onRightIconPress={() => router.push("/account")}
+      />
       <Animated.View style={[styles.header, { opacity: headerFade }]}>
         <View style={styles.headerTop}>
           <Text style={styles.greeting}>
@@ -141,9 +197,17 @@ export default function ProjectsScreen() {
         </View>
       </Animated.View>
 
+      <SearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Şantiye ara..."
+      />
+
       {/* ── Liste başlığı ── */}
       <View style={styles.listHeader}>
-        <Text style={styles.listHeaderText}>TÜM ŞANTİYELER</Text>
+        <Text style={styles.listHeaderText}>
+          {search.trim() ? "ARAMA SONUÇLARI" : "TÜM ŞANTİYELER"}
+        </Text>
         <View style={styles.listHeaderLine} />
       </View>
 
@@ -153,7 +217,7 @@ export default function ProjectsScreen() {
         </View>
       ) : (
         <FlatList
-          data={projects}
+          data={filteredProjects}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
@@ -166,9 +230,15 @@ export default function ProjectsScreen() {
                   color="#bfdbfe"
                 />
               </View>
-              <Text style={styles.emptyTitle}>Henüz şantiye eklenmedi</Text>
+              <Text style={styles.emptyTitle}>
+                {search.trim()
+                  ? "Eşleşen şantiye bulunamadı"
+                  : "Henüz şantiye eklenmedi"}
+              </Text>
               <Text style={styles.emptySub}>
-                Sağ alttaki + butonuna basarak{"\n"}ilk şantiyenizi oluşturun
+                {search.trim()
+                  ? "Farklı bir arama deneyin veya yeni bir şantiye ekleyin"
+                  : "Sağ alttaki + butonuna basarak\nilk şantiyenizi oluşturun"}
               </Text>
             </View>
           }
@@ -181,6 +251,7 @@ export default function ProjectsScreen() {
 
                 router.push(`/(tabs)?projectId=${item.id}`);
               }}
+              onEditPress={() => openRenameModal(item)}
               onLongPress={() => handleDelete(item)}
             />
           )}
@@ -190,7 +261,7 @@ export default function ProjectsScreen() {
       {/* ── FAB ── */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => setModalVisible(true)}
+        onPress={openCreateModal}
         activeOpacity={0.88}
       >
         <Ionicons name="add" size={28} color="#fff" />
@@ -201,7 +272,7 @@ export default function ProjectsScreen() {
         visible={modalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={closeModal}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
@@ -209,7 +280,7 @@ export default function ProjectsScreen() {
         >
           <TouchableOpacity
             style={{ flex: 1 }}
-            onPress={() => setModalVisible(false)}
+            onPress={closeModal}
           />
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
@@ -217,14 +288,18 @@ export default function ProjectsScreen() {
             <View style={styles.modalHeaderRow}>
               <View style={styles.modalIconBox}>
                 <MaterialCommunityIcons
-                  name="office-building-plus-outline"
+                  name={editingProject ? "pencil-outline" : "office-building-plus-outline"}
                   size={20}
                   color="#0058be"
                 />
               </View>
               <View>
-                <Text style={styles.modalTitle}>Yeni Şantiye</Text>
-                <Text style={styles.modalSub}>Şantiyenize bir isim verin</Text>
+                <Text style={styles.modalTitle}>
+                  {editingProject ? "Şantiye İsmini Değiştir" : "Yeni Şantiye"}
+                </Text>
+                <Text style={styles.modalSub}>
+                  {editingProject ? "Yeni şantiye ismini yazın" : "Şantiyenize bir isim verin"}
+                </Text>
               </View>
             </View>
 
@@ -260,8 +335,14 @@ export default function ProjectsScreen() {
                 <ActivityIndicator color="#fff" />
               ) : (
                 <>
-                  <Ionicons name="add-circle-outline" size={20} color="#fff" />
-                  <Text style={styles.modalAddText}>Şantiyeyi Ekle</Text>
+                  <Ionicons
+                    name={editingProject ? "checkmark-circle-outline" : "add-circle-outline"}
+                    size={20}
+                    color="#fff"
+                  />
+                  <Text style={styles.modalAddText}>
+                    {editingProject ? "İsmi Kaydet" : "Şantiyeyi Ekle"}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>

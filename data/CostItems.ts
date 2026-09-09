@@ -1,4 +1,5 @@
 export const COST_ITEMS = [
+  { id: "yevmiye", title: "Günlük İşçilik", icon: "account-cash-outline" },
   { id: "demir", title: "Demir", icon: "crane" },
   { id: "beton", title: "Beton", icon: "home-outline" },
   { id: "siva", title: "Sıva", icon: "texture" },

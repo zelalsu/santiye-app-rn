@@ -1,0 +1,42 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "copyright": "2026 Zelalsu Kartal",
+    "version": "1.0",
+    "release": {
+      "automaticRelease": true
+    },
+    "info": {
+      "en-US": {
+        "title": "Şantiyen Cebinde",
+        "subtitle": "Şantiye ve maliyet yönetimi",
+        "privacyPolicyUrl": "https://zelalsu.github.io/Santiyen-Cebinde-Support/privacy.html",
+        "description": "Şantiyen Cebinde, inşaat projelerinizi tek yerde düzenlemenize yardımcı olur.\n\n• Şantiyelerinizi ayrı projeler halinde yönetin\n• Malzeme miktarı ve birim fiyatlarla maliyet hesaplayın\n• Şantiye günlüklerini ve taşeron kayıtlarını tutun\n• Proje belgelerini düzenleyin\n• Maliyet özetlerini PDF olarak oluşturup paylaşın\n\nHesabınızı ve verilerinizi uygulama içindeki Hesap ekranından dilediğiniz zaman kalıcı olarak silebilirsiniz.",
+        "keywords": [
+          "şantiye,inşaat,maliyet,proje,taşeron,günlük,malzeme,bütçe,rapor,belge"
+        ],
+        "releaseNotes": "İlk sürüm: şantiye yönetimi, maliyet hesaplama, günlük kayıtları, taşeron ve belge takibi."
+      }
+    },
+    "advisory": {
+      "ageRatingOverride": "NONE",
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "contests": "NONE",
+      "gambling": false,
+      "gamblingSimulated": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "kidsAgeBand": null,
+      "koreaAgeRatingOverride": "NONE",
+      "lootBox": false,
+      "matureOrSuggestiveThemes": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "NONE",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "unrestrictedWebAccess": false,
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE"
+    }
+  }
+}

@@ -2,11 +2,13 @@ import Header from "@/components/Header";
 import { uploadDocument } from "@/config/documentUpload";
 import { COLORS } from "@/constants/theme";
 import { auth, db, storage } from "@/firebaseConfig";
-import { PHASES_DATA, RequiredDocument } from "@/types/phases";
+import { RequiredDocument } from "@/types/phases";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
+import { cacheDirectory, downloadAsync } from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Sharing from "expo-sharing";
 import {
   collection,
   deleteDoc,
@@ -21,15 +23,17 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import WebView from "react-native-webview";
+import { WebView } from "react-native-webview";
 
 // ─── TYPES ────────────────────────────────────────────
 
@@ -65,13 +69,17 @@ export default function DocumentDetailScreen() {
   const [uploadingForId, setUploadingForId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [documentName, setDocumentName] = useState("");
+  const [isSavingDocument, setIsSavingDocument] = useState(false);
+  const [pendingFile, setPendingFile] = useState<{
+    uri: string;
+    type: "image" | "pdf";
+    requiredDocumentId?: string;
+  } | null>(null);
 
   const user = auth.currentUser;
-
-  // Aktif aşamanın gerekli belgeleri
-  const phaseData = PHASES_DATA.find((p) => p.id === phaseId);
-  const requiredDocuments: RequiredDocument[] =
-    phaseData?.requiredDocuments ?? [];
 
   useEffect(() => {
     if (!phaseId || !projectId) {
@@ -120,7 +128,6 @@ export default function DocumentDetailScreen() {
     }
   };
 
-  // Gerekli belge için yükleme — requiredDocumentId ile
   const handleUploadForRequired = useCallback(
     async (reqDoc: RequiredDocument) => {
       Alert.alert(
@@ -128,7 +135,8 @@ export default function DocumentDetailScreen() {
         "Nasıl eklemek istersiniz?",
         [
           { text: "İptal", style: "cancel" },
-          { text: "Fotoğraf / Görsel", onPress: () => pickImage(reqDoc.id) },
+          { text: "Fotoğraf Çek", onPress: () => pickCamera(reqDoc.id) },
+          { text: "Galeriden Seç", onPress: () => pickImage(reqDoc.id) },
           { text: "PDF Dosyası", onPress: () => pickPDF(reqDoc.id) },
         ],
         { cancelable: true },
@@ -144,7 +152,8 @@ export default function DocumentDetailScreen() {
       "Ne tür bir belge eklemek istiyorsunuz?",
       [
         { text: "İptal", style: "cancel" },
-        { text: "Fotoğraf / Görsel", onPress: () => pickImage() },
+        { text: "Fotoğraf Çek", onPress: () => pickCamera() },
+        { text: "Galeriden Seç", onPress: () => pickImage() },
         { text: "PDF Dosyası", onPress: () => pickPDF() },
       ],
       { cancelable: true },
@@ -152,11 +161,18 @@ export default function DocumentDetailScreen() {
   }, []);
 
   const pickImage = async (requiredDocumentId?: string) => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const { status, canAskAgain } =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
-        "İzin Gerekli",
-        "Fotoğraf eklemek için galeri iznine ihtiyacımız var.",
+        "Fotoğraf İzni Gerekli",
+        "Galerinizden bir belge seçebilmek için fotoğraf erişimine izin vermeniz gerekir.",
+        canAskAgain
+          ? [{ text: "Tamam" }]
+          : [
+              { text: "Vazgeç", style: "cancel" },
+              { text: "Ayarları Aç", onPress: () => Linking.openSettings() },
+            ],
       );
       return;
     }
@@ -166,11 +182,47 @@ export default function DocumentDetailScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      await uploadSelectedFile(
-        result.assets[0].uri,
-        "image",
+      setPendingFile({
+        uri: result.assets[0].uri,
+        type: "image",
         requiredDocumentId,
+      });
+
+      setDocumentName("");
+      setShowNameModal(true);
+    }
+  };
+
+  const pickCamera = async (requiredDocumentId?: string) => {
+    const { status, canAskAgain } =
+      await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Kamera İzni Gerekli",
+        "Belgenizin fotoğrafını çekebilmek için kamera erişimine izin vermeniz gerekir.",
+        canAskAgain
+          ? [{ text: "Tamam" }]
+          : [
+              { text: "Vazgeç", style: "cancel" },
+              { text: "Ayarları Aç", onPress: () => Linking.openSettings() },
+            ],
       );
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setPendingFile({
+        uri: result.assets[0].uri,
+        type: "image",
+        requiredDocumentId,
+      });
+      setDocumentName("");
+      setShowNameModal(true);
     }
   };
 
@@ -179,8 +231,15 @@ export default function DocumentDetailScreen() {
       type: "application/pdf",
       copyToCacheDirectory: true,
     });
-    if (result.canceled === false && result.assets[0]) {
-      await uploadSelectedFile(result.assets[0].uri, "pdf", requiredDocumentId);
+    if (!result.canceled && result.assets[0]) {
+      setPendingFile({
+        uri: result.assets[0].uri,
+        type: "pdf",
+        requiredDocumentId,
+      });
+
+      setDocumentName("");
+      setShowNameModal(true);
     }
   };
 
@@ -188,14 +247,17 @@ export default function DocumentDetailScreen() {
     uri: string,
     type: "image" | "pdf",
     requiredDocumentId?: string,
+    name?: string,
   ) => {
-    if (!user || !projectId || !phaseId) return;
+    if (!user || !projectId || !phaseId) return false;
 
     if (requiredDocumentId) setUploadingForId(requiredDocumentId);
     else setUploading(true);
 
     try {
-      const fileName = `${Date.now()}_${type === "image" ? "image" : "document"}`;
+      const fileName =
+        name?.trim() ||
+        `${Date.now()}_${type === "image" ? "image" : "document"}`;
       const fileType = type === "image" ? "image/jpeg" : "application/pdf";
 
       const result = await uploadDocument(
@@ -211,12 +273,19 @@ export default function DocumentDetailScreen() {
       if (result.success && result.document) {
         await loadDocuments();
         Alert.alert("Başarılı", "Belge başarıyla eklendi.");
+        return true;
       } else {
         throw new Error(result.error || "Yükleme başarısız");
       }
     } catch (error) {
       console.error("Yükleme hatası:", error);
-      Alert.alert("Hata", "Belge yüklenirken bir sorun oluştu.");
+      Alert.alert(
+        "Belge Yüklenemedi",
+        error instanceof Error
+          ? error.message
+          : "Bağlantınızı kontrol edip tekrar deneyin.",
+      );
+      return false;
     } finally {
       setUploadingForId(null);
       setUploading(false);
@@ -271,6 +340,51 @@ export default function DocumentDetailScreen() {
     setModalVisible(true);
   };
 
+  const handleShareDocument = async () => {
+    if (!selectedDoc || sharing) return;
+
+    try {
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert(
+          "Paylaşım desteklenmiyor",
+          "Bu cihazda paylaşım özelliği kullanılamıyor.",
+        );
+        return;
+      }
+
+      setSharing(true);
+      let uri = selectedDoc.url;
+
+      if (!uri.startsWith("file://")) {
+        if (!cacheDirectory) throw new Error("Geçici depolama alanı bulunamadı.");
+
+        const safeName = selectedDoc.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const expectedExtension = selectedDoc.type === "pdf" ? ".pdf" : ".jpg";
+        const fileName = safeName.toLowerCase().endsWith(expectedExtension)
+          ? safeName
+          : `${safeName}${expectedExtension}`;
+        const destination = `${cacheDirectory}shared-${Date.now()}-${fileName}`;
+        const download = await downloadAsync(uri, destination);
+        if (download.status !== 200) {
+          throw new Error(`Belge indirilemedi (HTTP ${download.status})`);
+        }
+        uri = download.uri;
+      }
+
+      await Sharing.shareAsync(uri, {
+        mimeType:
+          selectedDoc.type === "pdf" ? "application/pdf" : "image/jpeg",
+        UTI: selectedDoc.type === "pdf" ? "com.adobe.pdf" : "public.jpeg",
+        dialogTitle: "Belgeyi paylaş veya kaydet",
+      });
+    } catch (error) {
+      console.error("Belge paylaşım hatası:", error);
+      Alert.alert("Hata", "Belge paylaşılırken bir sorun oluştu.");
+    } finally {
+      setSharing(false);
+    }
+  };
+
   const formatFileSize = (bytes?: number) => {
     if (!bytes) return "";
     const sizes = ["B", "KB", "MB", "GB"];
@@ -287,10 +401,6 @@ export default function DocumentDetailScreen() {
       minute: "2-digit",
     });
   };
-
-  // Gerekli belge için yüklenmiş dosyayı bul
-  const getUploadedForRequired = (reqId: string) =>
-    documents.find((d) => d.requiredDocumentId === reqId);
 
   const renderDocument = ({ item }: { item: Document }) => (
     <TouchableOpacity
@@ -370,86 +480,6 @@ export default function DocumentDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── GEREKLİ BELGELER ── */}
-        {requiredDocuments.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Gerekli Belgeler</Text>
-            <Text style={styles.sectionSub}>
-              {documents.filter((d) => d.requiredDocumentId).length}/
-              {requiredDocuments.length} tamamlandı
-            </Text>
-
-            {requiredDocuments.map((reqDoc) => {
-              const uploaded = getUploadedForRequired(reqDoc.id);
-              const isUploading = uploadingForId === reqDoc.id;
-
-              return (
-                <View key={reqDoc.id} style={styles.requiredRow}>
-                  <View
-                    style={[
-                      styles.requiredStatus,
-                      uploaded && styles.requiredStatusDone,
-                    ]}
-                  >
-                    <Ionicons
-                      name={uploaded ? "checkmark" : "document-outline"}
-                      size={16}
-                      color={uploaded ? "#16A34A" : "#94A3B8"}
-                    />
-                  </View>
-
-                  <View style={styles.requiredInfo}>
-                    <Text
-                      style={[
-                        styles.requiredName,
-                        uploaded && styles.requiredNameDone,
-                      ]}
-                    >
-                      {reqDoc.name}
-                    </Text>
-                    {uploaded && (
-                      <TouchableOpacity
-                        onPress={() => handleOpenDocument(uploaded)}
-                      >
-                        <Text style={styles.requiredUploaded} numberOfLines={1}>
-                          Göster →
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  {isUploading ? (
-                    <ActivityIndicator size="small" color={COLORS.primary} />
-                  ) : uploaded ? (
-                    <TouchableOpacity
-                      onPress={() => handleDeleteDocument(uploaded)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons
-                        name="trash-outline"
-                        size={18}
-                        color="#EF4444"
-                      />
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.uploadBtn}
-                      onPress={() => handleUploadForRequired(reqDoc)}
-                    >
-                      <Ionicons
-                        name="cloud-upload-outline"
-                        size={14}
-                        color={COLORS.primary}
-                      />
-                      <Text style={styles.uploadBtnText}>Yükle</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-        )}
-
         {/* ── DİĞER BELGELER ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Diğer Belgeler</Text>
@@ -487,46 +517,112 @@ export default function DocumentDetailScreen() {
 
       <Modal
         visible={modalVisible}
-        transparent={true}
         animationType="slide"
+        presentationStyle="fullScreen"
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {selectedDoc?.type === "image"
-                  ? "Görsel Önizleme"
-                  : "PDF Önizleme"}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setModalVisible(false)}
-                style={styles.modalClose}
-              >
-                <Ionicons name="close" size={20} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.modalBody}>
-              {selectedDoc?.type === "image" ? (
-                <Image
-                  source={{ uri: selectedDoc.url }}
-                  style={styles.modalImage}
-                  resizeMode="contain"
-                />
+        <SafeAreaView style={styles.previewContainer} edges={["top", "bottom"]}>
+          <View style={styles.previewHeader}>
+            <TouchableOpacity
+              onPress={() => setModalVisible(false)}
+              style={styles.previewCloseButton}
+              accessibilityLabel="Önizlemeyi kapat"
+            >
+              <Ionicons name="close" size={24} color="#334155" />
+            </TouchableOpacity>
+            <Text style={styles.previewTitle} numberOfLines={1}>
+              {selectedDoc?.name.replace(/^\d+_/, "") ?? "Belge Önizleme"}
+            </Text>
+            <TouchableOpacity
+              onPress={handleShareDocument}
+              style={styles.previewShareButton}
+              disabled={sharing || !selectedDoc}
+              accessibilityLabel="Belgeyi paylaş"
+            >
+              {sharing ? (
+                <ActivityIndicator size="small" color={COLORS.primary} />
               ) : (
-                <WebView
-                  source={{ uri: selectedDoc?.url || "" }}
-                  style={{ flex: 1 }}
-                  originWhitelist={["*"]}
-                  startInLoadingState
-                  renderLoading={() => (
-                    <View style={styles.webviewLoading}>
-                      <ActivityIndicator size="large" color={COLORS.primary} />
-                    </View>
-                  )}
-                />
+                <Ionicons name="share-outline" size={22} color={COLORS.primary} />
               )}
+            </TouchableOpacity>
+          </View>
+
+          {selectedDoc?.type === "image" ? (
+            <View style={styles.imagePreviewWrap}>
+              <Image
+                source={{ uri: selectedDoc.url }}
+                style={styles.imagePreview}
+                resizeMode="contain"
+              />
             </View>
+          ) : selectedDoc?.url ? (
+            <WebView
+              source={{ uri: selectedDoc.url }}
+              originWhitelist={["*"]}
+              style={styles.pdfPreview}
+            />
+          ) : (
+            <View style={styles.previewEmpty}>
+              <MaterialCommunityIcons
+                name="file-alert-outline"
+                size={48}
+                color="#94A3B8"
+              />
+              <Text style={styles.previewEmptyText}>Belge önizlenemedi.</Text>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={showNameModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.nameModal}>
+            <Text style={styles.modalTitle}>Belge Adı</Text>
+
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Örn: Statik Proje"
+              value={documentName}
+              onChangeText={setDocumentName}
+              editable={!isSavingDocument}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                isSavingDocument && styles.saveButtonLoading,
+              ]}
+              disabled={isSavingDocument}
+              onPress={async () => {
+                if (!pendingFile || isSavingDocument) return;
+
+                setIsSavingDocument(true);
+                try {
+                  const saved = await uploadSelectedFile(
+                    pendingFile.uri,
+                    pendingFile.type,
+                    pendingFile.requiredDocumentId,
+                    documentName.trim(),
+                  );
+
+                  if (!saved) return;
+                  setPendingFile(null);
+                  setDocumentName("");
+                  setShowNameModal(false);
+                } finally {
+                  setIsSavingDocument(false);
+                }
+              }}
+            >
+              {isSavingDocument ? (
+                <>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={styles.saveButtonText}>Kaydediliyor...</Text>
+                </>
+              ) : (
+                <Text style={styles.saveButtonText}>Kaydet</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -620,6 +716,48 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  nameModal: {
+    width: "88%",
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 20,
+  },
+
+  nameInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 16,
+    color: COLORS.text,
+  },
+
+  saveButton: {
+    marginTop: 18,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  saveButtonLoading: { opacity: 0.8 },
+
+  saveButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
   documentIcon: {
     width: 50,
     height: 50,
@@ -653,6 +791,45 @@ const styles = StyleSheet.create({
   documentMetaText: { fontSize: 11, color: "#94A3B8" },
   documentMetaDot: { fontSize: 11, color: "#CBD5E1" },
   deleteButton: { padding: 8, marginLeft: 8 },
+  previewContainer: { flex: 1, backgroundColor: "#F8FAFC" },
+  previewHeader: {
+    height: 60,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  previewCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F1F5F9",
+  },
+  previewTitle: {
+    flex: 1,
+    marginHorizontal: 12,
+    color: "#1E293B",
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  previewShareButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primaryLight,
+  },
+  imagePreviewWrap: { flex: 1, padding: 16, justifyContent: "center" },
+  imagePreview: { width: "100%", height: "100%" },
+  pdfPreview: { flex: 1, backgroundColor: "#fff" },
+  previewEmpty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  previewEmptyText: { color: "#64748B", fontSize: 15 },
   fab: {
     position: "absolute",
     bottom: 24,

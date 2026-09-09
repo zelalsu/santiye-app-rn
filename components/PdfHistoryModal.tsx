@@ -1,6 +1,7 @@
 import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { documentDirectory, getInfoAsync } from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
@@ -14,12 +15,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { WebView } from "react-native-webview";
 
 interface PdfRecord {
   id: string;
   createdAt: any;
   totalCost: number;
   projectName: string;
+  fileName?: string;
+  fileUri?: string;
 }
 
 export default function PdfHistoryModal({
@@ -37,6 +41,8 @@ export default function PdfHistoryModal({
   const [records, setRecords] = useState<PdfRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [sharingId, setSharingId] = useState<string | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) loadHistory();
@@ -63,13 +69,37 @@ export default function PdfHistoryModal({
   const handleShare = async (record: PdfRecord) => {
     try {
       setSharingId(record.id);
-      const html = generateHtml();
-      const { uri } = await Print.printToFileAsync({ html });
+      const uri = await getPdfUri(record);
       await Sharing.shareAsync(uri);
     } catch (e) {
       console.log(e);
     } finally {
       setSharingId(null);
+    }
+  };
+
+  const getPdfUri = async (record: PdfRecord) => {
+    const savedUri =
+      record.fileUri ||
+      (record.fileName ? `${documentDirectory}${record.fileName}` : null);
+
+    if (savedUri) {
+      const info = await getInfoAsync(savedUri);
+      if (info.exists) return savedUri;
+    }
+
+    const { uri } = await Print.printToFileAsync({ html: generateHtml() });
+    return uri;
+  };
+
+  const handlePreview = async (record: PdfRecord) => {
+    try {
+      setPreviewingId(record.id);
+      setPreviewUri(await getPdfUri(record));
+    } catch (e) {
+      console.log(e);
+    } finally {
+      setPreviewingId(null);
     }
   };
 
@@ -141,9 +171,26 @@ export default function PdfHistoryModal({
                 </View>
 
                 <TouchableOpacity
+                  onPress={() => handlePreview(item)}
+                  style={styles.previewBtn}
+                  disabled={previewingId === item.id}
+                  accessibilityLabel={`${item.projectName} PDF önizlemesi`}
+                >
+                  {previewingId === item.id ? (
+                    <ActivityIndicator size="small" color={COLORS.primary} />
+                  ) : (
+                    <MaterialCommunityIcons
+                      name="eye-outline"
+                      size={20}
+                      color={COLORS.primary}
+                    />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
                   onPress={() => handleShare(item)}
                   style={styles.shareBtn}
                   disabled={sharingId === item.id}
+                  accessibilityLabel={`${item.projectName} PDF paylaş`}
                 >
                   {sharingId === item.id ? (
                     <ActivityIndicator size="small" color={COLORS.primary} />
@@ -160,6 +207,34 @@ export default function PdfHistoryModal({
           />
         )}
       </View>
+
+      <Modal
+        visible={Boolean(previewUri)}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setPreviewUri(null)}
+      >
+        <View style={styles.previewContainer}>
+          <View style={styles.previewHeader}>
+            <TouchableOpacity
+              onPress={() => setPreviewUri(null)}
+              style={styles.closeBtn}
+              accessibilityLabel="PDF önizlemesini kapat"
+            >
+              <MaterialCommunityIcons name="close" size={22} color="#64748B" />
+            </TouchableOpacity>
+            <Text style={styles.title}>PDF Önizleme</Text>
+            <View style={{ width: 42 }} />
+          </View>
+          {previewUri && (
+            <WebView
+              source={{ uri: previewUri }}
+              originWhitelist={["*"]}
+              style={styles.pdfPreview}
+            />
+          )}
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -221,6 +296,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  previewBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  previewContainer: { flex: 1, backgroundColor: "#F5F7FB" },
+  previewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    paddingTop: 55,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+  pdfPreview: { flex: 1, backgroundColor: "#fff" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   emptyText: { color: "#64748b", fontSize: 15 },
 });

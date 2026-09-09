@@ -1,6 +1,7 @@
 import HowItWorksModal from "@/components/HowItWorksModal";
 import { COLORS } from "@/constants/theme";
 import { auth } from "@/firebaseConfig";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
@@ -18,16 +19,27 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function App() {
   const [howItWorksVisible, setHowItWorksVisible] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        router.replace("/projects");
+    let unsubscribe = () => {};
+
+    AsyncStorage.getItem("hasCompletedOnboarding").then((completed) => {
+      if (completed !== "true") {
+        router.replace("/onboarding");
+        return;
       }
+
+      unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) router.replace("/projects");
+        else setReady(true);
+      });
     });
 
     return () => unsubscribe();
   }, []);
+
+  if (!ready) return null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -36,7 +48,7 @@ export default function App() {
           <View style={styles.logoContainer}>
             <View style={styles.iconBox}>
               <Image
-                source={require("../assets/images/app-icon.png")}
+                source={require("../assets/images/splash-brand.png")}
                 style={styles.logo}
               />
             </View>

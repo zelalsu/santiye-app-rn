@@ -5,19 +5,33 @@ import { StyleSheet, TextInput, View } from "react-native";
 interface Props {
   value: string;
   onChange: (text: string) => void;
+  placeholder?: string;
 }
 
-export default function SearchBar({ value, onChange }: Props) {
+export default function SearchBar({
+  value,
+  onChange,
+  placeholder = "Kategori ara...",
+}: Props) {
   return (
     <View style={styles.searchSection}>
       <View style={styles.searchContainer}>
         <Ionicons name="search-outline" size={20} color="#999" />
         <TextInput
           style={styles.searchInput}
-          placeholder="Kategori ara..."
+          placeholder={placeholder}
+          placeholderTextColor="#94a3b8"
           value={value}
           onChangeText={onChange}
         />
+        {value.length > 0 && (
+          <Ionicons
+            name="close-circle"
+            size={20}
+            color="#cbd5e1"
+            onPress={() => onChange("")}
+          />
+        )}
       </View>
     </View>
   );

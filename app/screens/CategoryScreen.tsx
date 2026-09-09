@@ -49,6 +49,9 @@ export default function CategoryScreen({ config }: Props) {
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [showTemplates, setShowTemplates] = useState(false);
+  const [isCustomLabel, setIsCustomLabel] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const customLabelRef = useRef<TextInput>(null);
   const unitPriceRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -93,8 +96,25 @@ export default function CategoryScreen({ config }: Props) {
 
   const handleSelectTemplate = (t: EntryTemplate) => {
     setLabel(t.label);
+    setIsCustomLabel(false);
     setShowTemplates(false);
     setTimeout(() => unitPriceRef.current?.focus(), 100);
+  };
+
+  const handleSelectCustomLabel = () => {
+    setLabel("");
+    setIsCustomLabel(true);
+    setShowTemplates(false);
+    setTimeout(() => customLabelRef.current?.focus(), 100);
+  };
+
+  const resetForm = () => {
+    setLabel("");
+    setIsCustomLabel(false);
+    setQuantity("");
+    setUnitPrice("");
+    setEditingEntryId(null);
+    setShowTemplates(false);
   };
 
   const handleAddEntry = async () => {
@@ -103,7 +123,7 @@ export default function CategoryScreen({ config }: Props) {
     if (!qty || !price || !label.trim() || !user || !projectId) return;
 
     const newEntry: Entry = {
-      id: uuid.v4() as string,
+      id: editingEntryId ?? (uuid.v4() as string),
       label: label.trim(),
       quantity: qty,
       unit: config.unit,
@@ -111,7 +131,11 @@ export default function CategoryScreen({ config }: Props) {
       total: qty * price,
     };
 
-    const updatedEntries = [...entries, newEntry];
+    const updatedEntries = editingEntryId
+      ? entries.map((entry) =>
+          entry.id === editingEntryId ? newEntry : entry,
+        )
+      : [...entries, newEntry];
     const newTotal = updatedEntries.reduce((sum, e) => sum + e.total, 0);
 
     const catRef = doc(
@@ -126,9 +150,19 @@ export default function CategoryScreen({ config }: Props) {
     await setDoc(catRef, { entries: updatedEntries, total: newTotal });
     await updateProjectTotal();
 
-    setLabel("");
-    setQuantity("");
-    setUnitPrice("");
+    resetForm();
+  };
+
+  const handleEditEntry = (entry: Entry) => {
+    const isTemplate = config.templates?.some(
+      (template) => template.label === entry.label,
+    );
+    setEditingEntryId(entry.id);
+    setLabel(entry.label);
+    setIsCustomLabel(!isTemplate);
+    setQuantity(String(entry.quantity).replace(".", ","));
+    setUnitPrice(String(entry.unitPrice).replace(".", ","));
+    setShowTemplates(false);
   };
 
   const handleRemoveEntry = async (entryId: string) => {
@@ -176,7 +210,16 @@ export default function CategoryScreen({ config }: Props) {
       >
         {/* FORM KARTI */}
         <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Yeni Kalem</Text>
+          <View style={styles.formTitleRow}>
+            <Text style={styles.formTitle}>
+              {editingEntryId ? "Kalemi Düzenle" : "Yeni Kalem"}
+            </Text>
+            {editingEntryId && (
+              <TouchableOpacity onPress={resetForm} hitSlop={8}>
+                <Text style={styles.cancelEditText}>Vazgeç</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           {/* Dropdown */}
           {config.templates && config.templates.length > 0 && (
@@ -197,7 +240,7 @@ export default function CategoryScreen({ config }: Props) {
                   ]}
                   numberOfLines={1}
                 >
-                  {label || "Seçiniz..."}
+                  {isCustomLabel ? "Diğer" : label || "Seçiniz..."}
                 </Text>
                 <MaterialCommunityIcons
                   name={showTemplates ? "chevron-up" : "chevron-down"}
@@ -247,7 +290,49 @@ export default function CategoryScreen({ config }: Props) {
                         </TouchableOpacity>
                       );
                     })}
+                    <TouchableOpacity
+                      style={[
+                        styles.dropdownItem,
+                        isCustomLabel && styles.dropdownItemActive,
+                      ]}
+                      onPress={handleSelectCustomLabel}
+                      activeOpacity={0.6}
+                    >
+                      <Text
+                        style={[
+                          styles.dropdownItemText,
+                          isCustomLabel && styles.dropdownItemTextActive,
+                        ]}
+                      >
+                        Diğer
+                      </Text>
+                      {isCustomLabel && (
+                        <View style={styles.checkBadge}>
+                          <MaterialCommunityIcons
+                            name="check"
+                            size={12}
+                            color="#fff"
+                          />
+                        </View>
+                      )}
+                    </TouchableOpacity>
                   </ScrollView>
+                </View>
+              )}
+
+              {isCustomLabel && (
+                <View style={styles.customLabelGroup}>
+                  <Text style={styles.fieldLabel}>Açıklama</Text>
+                  <TextInput
+                    ref={customLabelRef}
+                    style={styles.input}
+                    placeholder="Örn. Hafriyat işçisi yevmiyesi"
+                    placeholderTextColor="#C0C0C0"
+                    value={label}
+                    onChangeText={setLabel}
+                    returnKeyType="next"
+                    onSubmitEditing={() => unitPriceRef.current?.focus()}
+                  />
                 </View>
               )}
             </View>
@@ -310,12 +395,14 @@ export default function CategoryScreen({ config }: Props) {
             disabled={!isFormValid}
           >
             <MaterialCommunityIcons
-              name="plus"
+              name={editingEntryId ? "content-save-outline" : "plus"}
               size={18}
               color="#fff"
               style={{ marginRight: 6 }}
             />
-            <Text style={styles.addBtnText}>Kalemi Ekle</Text>
+            <Text style={styles.addBtnText}>
+              {editingEntryId ? "Değişiklikleri Kaydet" : "Kalemi Ekle"}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -372,17 +459,34 @@ export default function CategoryScreen({ config }: Props) {
                     minimumFractionDigits: 2,
                   })}
                 </Text>
-                <TouchableOpacity
-                  style={styles.deleteBtn}
-                  onPress={() => handleRemoveEntry(item.id)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <MaterialCommunityIcons
-                    name="trash-can-outline"
-                    size={17}
-                    color="#E24B4A"
-                  />
-                </TouchableOpacity>
+                <View style={styles.entryActions}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.label} kalemini düzenle`}
+                    style={styles.editBtn}
+                    onPress={() => handleEditEntry(item)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialCommunityIcons
+                      name="pencil-outline"
+                      size={17}
+                      color={COLORS.primary}
+                    />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.label} kalemini sil`}
+                    style={styles.deleteBtn}
+                    onPress={() => handleRemoveEntry(item.id)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialCommunityIcons
+                      name="trash-can-outline"
+                      size={17}
+                      color="#E24B4A"
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           ))
@@ -434,7 +538,19 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "700",
     color: COLORS.text,
+  },
+
+  formTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 20,
+  },
+
+  cancelEditText: {
+    color: COLORS.danger,
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   fieldGroup: { marginBottom: 14 },
@@ -469,6 +585,10 @@ const styles = StyleSheet.create({
   half: { flex: 1 },
 
   dropdownWrapper: { marginBottom: 14 },
+
+  customLabelGroup: {
+    marginTop: 12,
+  },
 
   dropdownBtn: {
     flexDirection: "row",
@@ -696,6 +816,17 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 8,
     backgroundColor: COLORS.dangerBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  entryActions: { flexDirection: "row", gap: 6 },
+
+  editBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: COLORS.primaryLight,
     alignItems: "center",
     justifyContent: "center",
   },

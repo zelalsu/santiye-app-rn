@@ -1,6 +1,6 @@
 // config/categoryConfig.ts
 
-export type UnitType = "ton" | "m³" | "m²" | "adet" | "mt" | "set";
+export type UnitType = "ton" | "m³" | "m²" | "adet" | "mt" | "set" | "gün";
 
 export interface EntryTemplate {
   label: string; // Seçilince açıklama alanına dolar
@@ -17,6 +17,25 @@ export interface CategoryConfig {
 }
 
 export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
+  yevmiye: {
+    id: "yevmiye",
+    title: "Günlük İşçilik",
+    icon: "account-cash-outline",
+    unit: "gün",
+    unitLabel: "gün",
+    quantityHint: "Kaç gün?",
+    templates: [
+      { label: "Usta yevmiyesi" },
+      { label: "Kalfa yevmiyesi" },
+      { label: "İşçi yevmiyesi" },
+      { label: "Operatör yevmiyesi" },
+      { label: "Elektrik ustası yevmiyesi" },
+      { label: "Tesisat ustası yevmiyesi" },
+      { label: "Boya ustası yevmiyesi" },
+      { label: "Gece mesaisi" },
+      { label: "Fazla mesai" },
+    ],
+  },
   demir: {
     id: "demir",
     title: "Demir",

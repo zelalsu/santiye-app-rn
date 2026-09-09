@@ -3,15 +3,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
 import React from "react";
-import { StyleSheet } from "react-native";
+import { StyleSheet, useColorScheme, View } from "react-native";
 
 export default function TabLayout() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === "dark";
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: "#999",
+        tabBarActiveTintColor: isDark ? "#69A7F5" : COLORS.primary,
+        tabBarInactiveTintColor: isDark ? "#AEB3BC" : "#6B7280",
         tabBarStyle: styles.tabBar,
 
         tabBarLabelStyle: {
@@ -20,10 +23,21 @@ export default function TabLayout() {
         },
         tabBarBackground: () => (
           <BlurView
-            intensity={80}
-            tint="light"
+            intensity={95}
+            tint={isDark ? "dark" : "light"}
             style={StyleSheet.absoluteFill}
-          />
+          >
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(10, 12, 16, 0.42)"
+                    : "rgba(255, 255, 255, 0.28)",
+                },
+              ]}
+            />
+          </BlurView>
         ),
       }}
     >
@@ -33,6 +47,24 @@ export default function TabLayout() {
           title: "Ana Sayfa",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="daily"
+        options={{
+          title: "Günlük",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="contractors"
+        options={{
+          title: "Taşeron",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people" size={size} color={color} />
           ),
         }}
       />

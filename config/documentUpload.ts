@@ -28,7 +28,14 @@ export const uploadDocument = async (
   try {
     // Dosya bilgilerini al - Yeni API ile
     const fileInfo = await FileSystem.getInfoAsync(fileUri);
-    const fileSize = fileInfo.size || 0;
+    const fileSize = fileInfo.exists && "size" in fileInfo ? fileInfo.size : 0;
+
+    if (fileSize > 20 * 1024 * 1024) {
+      return {
+        success: false,
+        error: "Dosya 20 MB'dan büyük olamaz. Daha küçük bir dosya seçin.",
+      };
+    }
 
     // Storage path oluştur
     const storagePath = `users/${userId}/projects/${projectId}/phases/${phaseId}/documents/${fileName}`;

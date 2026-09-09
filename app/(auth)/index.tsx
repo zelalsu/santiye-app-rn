@@ -2,6 +2,7 @@ import { COLORS } from "@/constants/theme";
 import { auth } from "@/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -23,10 +24,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 type Mode = "login" | "register";
 
+const PRIVACY_POLICY_URL =
+  "https://zelalsu.github.io/Santiyen-Cebinde-Support/privacy.html";
+
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>("login");
-  const [email, setEmail] = useState("sena@gmail.com");
-  const [password, setPassword] = useState("123456");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -106,7 +110,7 @@ export default function LoginScreen() {
           {/* Logo */}
           <View style={styles.logoRow}>
             <Image
-              source={require("../../assets/images/app-icon.png")}
+              source={require("../../assets/images/splash-brand.png")}
               style={styles.logo}
             />
 
@@ -252,6 +256,16 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          <TouchableOpacity
+            accessibilityRole="link"
+            accessibilityLabel="Gizlilik politikasını aç"
+            style={styles.privacyLink}
+            onPress={() => WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL)}
+          >
+            <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.privacyLinkText}>Gizlilik Politikası</Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -432,5 +446,22 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: COLORS.primary,
     fontFamily: "Inter",
+  },
+
+  privacyLink: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    padding: 12,
+    marginTop: 14,
+  },
+
+  privacyLinkText: {
+    color: COLORS.primary,
+    fontSize: 13,
+    fontWeight: "700",
+    fontFamily: "Inter",
+    textDecorationLine: "underline",
   },
 });

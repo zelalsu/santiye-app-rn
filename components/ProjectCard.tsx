@@ -13,11 +13,13 @@ export default function ProjectCard({
   item,
   index,
   onPress,
+  onEditPress,
   onLongPress,
 }: {
   item: Project;
   index: number;
   onPress: () => void;
+  onEditPress: () => void;
   onLongPress: () => void;
 }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -99,15 +101,22 @@ export default function ProjectCard({
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`${item.name} adını değiştir`}
+            onPress={onEditPress}
+            style={[styles.actionButton, styles.editButton]}
+          >
+            <MaterialCommunityIcons
+              name="pencil-outline"
+              size={18}
+              color="#1e529c"
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`${item.name} şantiyesini sil`}
             onPress={onLongPress}
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 10,
-              backgroundColor: "#fee2e2",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            style={[styles.actionButton, styles.deleteButton]}
           >
             <MaterialCommunityIcons
               name="trash-can-outline"
@@ -168,4 +177,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  actionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editButton: { backgroundColor: "#eff6ff" },
+  deleteButton: { backgroundColor: "#fee2e2" },
 });
