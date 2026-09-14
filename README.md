@@ -1,50 +1,72 @@
-# Welcome to your Expo app 👋
+# Şantiyen Cebinde
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Şantiye projelerini, maliyetleri, günlük kayıtları, taşeronları ve belgeleri tek yerden yönetmek için geliştirilmiş mobil uygulama.
 
-## Get started
+<p align="center">
+  <img src="assets/images/splash-brand.png" alt="Şantiyen Cebinde logosu" width="180" />
+</p>
 
-1. Install dependencies
+## Neler yapabilirsiniz?
 
-   ```bash
-   npm install
-   ```
+- Birden fazla şantiye oluşturabilir, arayabilir ve adlarını düzenleyebilirsiniz.
+- Malzeme ve işçilik kalemlerini miktar ile birim fiyat üzerinden hesaplayabilir; eklediğiniz kalemleri düzenleyebilirsiniz.
+- Şantiye günlüklerini ve taşeron kayıtlarını tutabilirsiniz.
+- Belgelerinize PDF yükleyebilir, galeriden görsel seçebilir veya doğrudan fotoğraf çekebilirsiniz.
+- Maliyet özetini PDF olarak oluşturabilir, önizleyebilir ve paylaşabilirsiniz.
+- Hesabınızı ve ilişkili verilerinizi uygulama içinden silebilirsiniz.
 
-2. Start the app
+## Teknolojiler
 
-   ```bash
-   npx expo start
-   ```
+| Alan | Kullanılan teknoloji |
+| --- | --- |
+| Mobil uygulama | React Native, Expo SDK 54, TypeScript |
+| Ekranlar ve gezinme | Expo Router |
+| Kimlik doğrulama ve veri | Firebase Authentication, Cloud Firestore, Firebase Storage |
+| Belgeler ve raporlar | Expo Image Picker, Document Picker, Print, Sharing |
+| iOS dağıtımı | EAS Build ve App Store Connect / TestFlight |
 
-In the output, you'll find options to open the app in a
+## Yerel geliştirme
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Gereksinimler: Node.js, Yarn 1.x ve iOS Simulator veya Android Emulator. Proje şu anda **Expo SDK 54** kullanır. Fiziksel iPhone'daki daha yeni Expo Go sürümü SDK 54 ile uyumsuz olabilir; böyle bir durumda uyumlu iOS Simulator veya uygulamanın development/TestFlight build'ini kullanın.
 
 ```bash
-npm run reset-project
+git clone https://github.com/zelalsu/santiye-app-rn.git
+cd santiye-app-rn
+yarn install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Başlatma ekranında `i` ile iOS Simulator'ı, `a` ile Android Emulator'ı açabilirsiniz. Kod ve bağımlılık kontrolleri için:
 
-## Learn more
+```bash
+npx expo install --check
+yarn lint
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Uygulama Firebase hizmetlerine bağlanır. Kendi ortamınızda çalıştıracaksanız `firebaseConfig.ts` içindeki Firebase proje ayarlarını kendi projenize göre düzenleyin; Authentication, Firestore ve Storage hizmetlerini ve güvenlik kurallarını da yapılandırın. Yalnızca istemci ayarlarını değiştirmek yeterli değildir.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Proje yapısı
 
-## Join the community
+```text
+app/               Ekranlar ve Expo Router rotaları
+components/        Tekrar kullanılan arayüz bileşenleri
+config/            Uygulama yapılandırması ve dosya yükleme
+constants/         Tema değerleri
+data/              Maliyet kalemi tanımları
+firebaseConfig.ts  Firebase istemci bağlantısı
+app.json           Expo uygulama ayarları ve izin açıklamaları
+eas.json           EAS build/gönderim profilleri
+```
 
-Join our community of developers creating universal apps.
+## Gizlilik ve destek
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Kamera ve fotoğraf arşivi erişimi yalnızca kullanıcı belgeye fotoğraf eklemeyi seçtiğinde istenir. Uygulama yalnızca fotoğraf çekimi için mikrofon izni istemez.
+
+- [Gizlilik Politikası](https://zelalsu.github.io/Santiyen-Cebinde-Support/privacy.html)
+- [Destek sayfası](https://zelalsu.github.io/Santiyen-Cebinde-Support/)
+
+## Durum
+
+Uygulamanın iOS build'leri TestFlight üzerinden test edilmektedir. TestFlight'a yüklenen bir build, App Store'da yayımlandığı anlamına gelmez.
+
+© 2026 Zelalsu Kartal
