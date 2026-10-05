@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { initializeApp } from "firebase/app";
 import { getReactNativePersistence, initializeAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 
 // See: https://firebase.google.com/docs/web/learn-more#config-object
@@ -23,5 +24,8 @@ export const auth = initializeAuth(app, {
 });
 
 export const db = getFirestore(app);
+// Callable Functions, Avrupa bölgesinde tutuluyor; aksi halde istemci varsayılan
+// bölgeye istek göndererek abonelik doğrulamasını bulamaz.
+export const functions = getFunctions(app, "europe-west1");
 export const storage = getStorage(app);
 export default app;

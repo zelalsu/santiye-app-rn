@@ -1,10 +1,11 @@
 import Header from "@/components/Header";
+import { canSeeCosts, loadActiveProject } from "@/config/projectAccess";
+import { recalculateProjectTotal } from "@/config/projectCosts";
 import { COLORS } from "@/constants/theme";
-import { auth, db } from "@/firebaseConfig";
+import { auth, db, functions } from "@/firebaseConfig";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import {
   addDoc,
   collection,
@@ -15,7 +16,8 @@ import {
   query,
   serverTimestamp,
 } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import { httpsCallable } from "firebase/functions";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -28,6 +30,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useIAP, type Purchase } from "react-native-iap";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 interface Contractor {
@@ -42,13 +45,25 @@ interface Contractor {
 }
 
 const parseMoney = (value: string) => parseFloat(value.replace(",", ".")) || 0;
+const CONTRACTOR_PRO_PRODUCT_ID = "com.santiyencebinde.pro.monthly";
+
+interface ContractorProSubscription {
+  active?: boolean;
+}
 
 export default function ContractorsScreen() {
-  const params = useLocalSearchParams<{ projectId?: string }>();
+  const params = useLocalSearchParams<{
+    projectId?: string;
+    ownerId?: string;
+  }>();
   const user = auth.currentUser;
   const userId = user?.uid;
 
   const [projectId, setProjectId] = useState(params.projectId ?? "");
+  const [projectOwnerId, setProjectOwnerId] = useState(params.ownerId ?? "");
+  const [role, setRole] = useState<
+    "owner" | "manager" | "office" | "chief" | "field" | undefined
+  >();
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -60,20 +75,203 @@ export default function ContractorsScreen() {
   const [note, setNote] = useState("");
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [proLoading, setProLoading] = useState(true);
+  const [isContractorPro, setIsContractorPro] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogRequest, setCatalogRequest] = useState(0);
+
+  const verifyPurchase = useCallback(
+    async (purchase: Purchase) => {
+      if (!projectId || !purchase.id) return false;
+
+      const verifyContractorPro = httpsCallable<
+        { transactionId: string; projectId: string },
+        { active: boolean }
+      >(functions, "verifyContractorPro");
+      const result = await verifyContractorPro({
+        transactionId: purchase.id,
+        projectId,
+      });
+      return result.data.active;
+    },
+    [projectId],
+  );
+
+  const {
+    connected: storeConnected,
+    subscriptions,
+    availablePurchases,
+    fetchProducts,
+    getAvailablePurchases,
+    requestPurchase,
+    finishTransaction,
+  } = useIAP({
+    onPurchaseSuccess: (purchase) => {
+      void (async () => {
+        setPurchaseLoading(true);
+        try {
+          const active = await verifyPurchase(purchase);
+          console.log("Taşeron Pro doğrulama sonucu:  ", active);
+          if (!active) {
+            Alert.alert(
+              "Abonelik etkinleşmedi",
+              "App Store aboneliği etkin görünmüyor. Satın alımları geri yükleyip tekrar deneyin.",
+            );
+            return;
+          }
+          await finishTransaction({ purchase, isConsumable: false });
+          Alert.alert(
+            "Pro etkin",
+            "Taşeron takibi bu şantiye için etkinleştirildi.",
+          );
+        } catch (error) {
+          console.error("Taşeron Pro doğrulanamadı:", error);
+          Alert.alert(
+            "Doğrulama yapılamadı",
+            "Ödeme alınmadıysa tekrar deneyin. Ödeme alındıysa Satın Alımları Geri Yükle ile aboneliğinizi doğrulayın.",
+          );
+        } finally {
+          setPurchaseLoading(false);
+        }
+      })();
+    },
+    onPurchaseError: (error) => {
+      if (error.code !== "user-cancelled") {
+        Alert.alert("Satın alma tamamlanamadı", error.message);
+      }
+      setPurchaseLoading(false);
+    },
+  });
 
   useEffect(() => {
-    if (params.projectId) {
-      setProjectId(params.projectId);
-      return;
-    }
-
-    AsyncStorage.getItem("activeProjectId").then((storedProjectId) => {
-      if (storedProjectId) setProjectId(storedProjectId);
+    loadActiveProject().then((active) => {
+      setProjectId(params.projectId ?? active.id);
+      setProjectOwnerId(params.ownerId ?? active.ownerId ?? userId ?? "");
+      setRole(active.role);
     });
-  }, [params.projectId]);
+  }, [params.ownerId, params.projectId, userId]);
 
   useEffect(() => {
-    if (!userId || !projectId) {
+    if (!role || canSeeCosts(role)) return;
+    router.replace({
+      pathname: "/(tabs)/daily",
+      params: { projectId, ownerId: projectOwnerId, role },
+    } as never);
+  }, [projectId, projectOwnerId, role]);
+
+  useEffect(() => {
+    if (!projectId || !projectOwnerId || !canSeeCosts(role)) return;
+
+    setProLoading(true);
+    const subscriptionRef = doc(
+      db,
+      "users",
+      projectOwnerId,
+      "projects",
+      projectId,
+      "subscriptions",
+      "contractorPro",
+    );
+    return onSnapshot(
+      subscriptionRef,
+      (snapshot) => {
+        const subscription = snapshot.data() as
+          | ContractorProSubscription
+          | undefined;
+        setIsContractorPro(subscription?.active === true);
+        setProLoading(false);
+      },
+      (error) => {
+        console.error("Taşeron Pro durumu alınamadı:", error);
+        setProLoading(false);
+      },
+    );
+  }, [projectId, projectOwnerId, role]);
+
+  useEffect(() => {
+    console.log("[IAP] Store bağlantısı:", {
+      connected: storeConnected,
+      platform: Platform.OS,
+      productId: CONTRACTOR_PRO_PRODUCT_ID,
+    });
+
+    if (!storeConnected) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      setCatalogLoading(true);
+      try {
+        // App Store Connect değişiklikleri sandbox kataloğuna gecikmeli
+        // yansıyabildiği için boş yanıt durumunda birkaç kez yeniden sorgula.
+        for (let attempt = 1; attempt <= 3 && !cancelled; attempt += 1) {
+          console.log(`[IAP] Abonelik ürünü sorgulanıyor (${attempt}/3)…`);
+          await fetchProducts({
+            skus: [CONTRACTOR_PRO_PRODUCT_ID],
+            type: "subs",
+          });
+          console.log("[IAP] Ürün sorgusu tamamlandı; hook sonucu bekleniyor.");
+          if (attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+          }
+        }
+      } catch (error) {
+        console.error("[IAP] App Store ürünleri alınamadı:", error);
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
+      }
+    })();
+
+    void getAvailablePurchases()
+      .then(() => {
+        console.log("[IAP] Satın alma geçmişi sorgusu tamamlandı.");
+      })
+      .catch((error) =>
+        console.warn("[IAP] Satın alma geçmişi alınamadı:", error),
+      );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogRequest, fetchProducts, getAvailablePurchases, storeConnected]);
+
+  useEffect(() => {
+    console.log(
+      "[IAP] Hook abonelikleri güncellendi:",
+      subscriptions.map((product) => ({
+        id: product.id,
+        displayPrice: product.displayPrice,
+        type: product.type,
+      })),
+    );
+  }, [subscriptions]);
+
+  useEffect(() => {
+    if (!projectId || availablePurchases.length === 0) return;
+    const purchase = availablePurchases.find(
+      (item) => item.productId === CONTRACTOR_PRO_PRODUCT_ID,
+    );
+    if (!purchase) return;
+
+    void (async () => {
+      try {
+        const active = await verifyPurchase(purchase);
+        if (active) await finishTransaction({ purchase, isConsumable: false });
+      } catch (error) {
+        console.warn("Geri yüklenen abonelik doğrulanamadı:", error);
+      }
+    })();
+  }, [availablePurchases, finishTransaction, projectId, verifyPurchase]);
+
+  useEffect(() => {
+    if (
+      !userId ||
+      !projectId ||
+      !projectOwnerId ||
+      !isContractorPro ||
+      !canSeeCosts(role)
+    ) {
       setLoading(false);
       return;
     }
@@ -82,25 +280,32 @@ export default function ContractorsScreen() {
     const contractorsRef = collection(
       db,
       "users",
-      userId,
+      projectOwnerId,
       "projects",
       projectId,
       "contractors",
     );
     const q = query(contractorsRef, orderBy("createdAt", "desc"));
 
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as Contractor[];
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const data = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })) as Contractor[];
 
-      setContractors(data);
-      setLoading(false);
-    });
+        setContractors(data);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Taşeron dinleyicisi açılamadı:", error);
+        setLoading(false);
+      },
+    );
 
     return unsub;
-  }, [projectId, userId]);
+  }, [isContractorPro, projectId, projectOwnerId, role, userId]);
 
   const totals = useMemo(() => {
     const contract = contractors.reduce(
@@ -129,6 +334,10 @@ export default function ContractorsScreen() {
     setNote("");
   };
 
+  const updateProjectTotal = async () => {
+    await recalculateProjectTotal(projectOwnerId, projectId);
+  };
+
   const handleAddContractor = async () => {
     if (!user || !projectId || !name.trim() || !workType.trim()) return;
 
@@ -138,20 +347,37 @@ export default function ContractorsScreen() {
     );
 
     setSaving(true);
-    await addDoc(
-      collection(db, "users", user.uid, "projects", projectId, "contractors"),
-      {
-        name: name.trim(),
-        workType: workType.trim(),
-        contractAmount: parseMoney(contractAmount),
-        paidAmount: parseMoney(paidAmount),
-        progress: parsedProgress,
-        note: note.trim(),
-        createdAt: serverTimestamp(),
-      },
-    );
-    setSaving(false);
-    resetForm();
+    try {
+      await addDoc(
+        collection(
+          db,
+          "users",
+          projectOwnerId,
+          "projects",
+          projectId,
+          "contractors",
+        ),
+        {
+          name: name.trim(),
+          workType: workType.trim(),
+          contractAmount: parseMoney(contractAmount),
+          paidAmount: parseMoney(paidAmount),
+          progress: parsedProgress,
+          note: note.trim(),
+          createdAt: serverTimestamp(),
+        },
+      );
+      await updateProjectTotal();
+      resetForm();
+    } catch (error) {
+      console.error("Taşeron kaydedilemedi:", error);
+      Alert.alert(
+        "Taşeron kaydedilemedi",
+        "Yazdıklarınız korunuyor. Bağlantınızı kontrol edip tekrar deneyin.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDeleteContractor = (contractor: Contractor) => {
@@ -167,13 +393,14 @@ export default function ContractorsScreen() {
             doc(
               db,
               "users",
-              user.uid,
+              projectOwnerId,
               "projects",
               projectId,
               "contractors",
               contractor.id,
             ),
           );
+          await updateProjectTotal();
         },
       },
     ]);
@@ -197,9 +424,165 @@ export default function ContractorsScreen() {
     contractAmount
   );
 
+  const subscription = subscriptions.find(
+    (item) => item.id === CONTRACTOR_PRO_PRODUCT_ID,
+  );
+  const isProjectOwner = projectOwnerId === userId;
+  const displayPrice = subscription?.displayPrice;
+  const isProductReady = Boolean(displayPrice);
+  const startPurchase = async () => {
+    if (!storeConnected) {
+      Alert.alert(
+        "App Store hazır değil",
+        "App Store bağlantısı kurulunca tekrar deneyin.",
+      );
+      return;
+    }
+    if (!isProductReady) {
+      Alert.alert(
+        "Abonelik henüz hazır değil",
+        "App Store fiyat bilgisini henüz göndermedi. Lütfen kısa süre sonra tekrar deneyin.",
+      );
+      return;
+    }
+    setPurchaseLoading(true);
+    try {
+      await requestPurchase({
+        request: { apple: { sku: CONTRACTOR_PRO_PRODUCT_ID } },
+        type: "subs",
+      });
+    } catch (error) {
+      console.error("Taşeron Pro satın alma başlatılamadı:", error);
+      setPurchaseLoading(false);
+    }
+  };
+
+  const restorePurchases = async () => {
+    setPurchaseLoading(true);
+    try {
+      await getAvailablePurchases();
+      Alert.alert(
+        "Kontrol ediliyor",
+        "Etkin abonelik varsa bu şantiye için doğrulanacak.",
+      );
+    } catch (error) {
+      console.error("Satın alma geri yüklenemedi:", error);
+      Alert.alert(
+        "Geri yüklenemedi",
+        "App Store hesabınızı ve bağlantınızı kontrol edip tekrar deneyin.",
+      );
+    } finally {
+      setPurchaseLoading(false);
+    }
+  };
+
+  if (!role || proLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Header title="Taşeron Takibi" leftMenuIcon accountIcon />
+        <View style={styles.proLoading}>
+          <ActivityIndicator color={COLORS.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!isContractorPro) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Header title="Taşeron Takibi" leftMenuIcon accountIcon />
+        <View style={styles.proScreen}>
+          <View style={styles.proIcon}>
+            <MaterialCommunityIcons
+              name="shield-crown-outline"
+              size={34}
+              color={COLORS.primary}
+            />
+          </View>
+          <Text style={styles.proTitle}>Taşeron Takibi Pro</Text>
+          <Text style={styles.proSubtitle}>
+            Sözleşmeleri, hakedişleri ve taşeron ödemelerini tek şantiyede takip
+            edin.
+          </Text>
+          <View style={styles.proFeatures}>
+            {[
+              "Sözleşme ve anlaşma bedeli",
+              "Ödenen / kalan hakediş takibi",
+              "Toplam maliyete otomatik yansıma",
+            ].map((feature) => (
+              <View key={feature} style={styles.proFeature}>
+                <MaterialCommunityIcons
+                  name="check-circle"
+                  size={18}
+                  color="#16A34A"
+                />
+                <Text style={styles.proFeatureText}>{feature}</Text>
+              </View>
+            ))}
+          </View>
+          {isProjectOwner ? (
+            <>
+              <Text style={styles.proPrice}>
+                {isProductReady
+                  ? `${displayPrice} / ay`
+                  : catalogLoading
+                    ? "App Store fiyatı yükleniyor…"
+                    : "Fiyat bilgisi alınamadı"}
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.proButton,
+                  (!isProductReady || purchaseLoading) &&
+                    styles.proButtonDisabled,
+                ]}
+                onPress={startPurchase}
+                disabled={!isProductReady || purchaseLoading}
+              >
+                {purchaseLoading ? (
+                  <ActivityIndicator color={COLORS.white} />
+                ) : (
+                  <Text style={styles.proButtonText}>
+                    {isProductReady
+                      ? "Aylık aboneliği başlat"
+                      : "Abonelik hazırlanıyor"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+              {!isProductReady && !catalogLoading ? (
+                <TouchableOpacity
+                  style={styles.restoreButton}
+                  onPress={() => setCatalogRequest((value) => value + 1)}
+                >
+                  <Text style={styles.restoreButtonText}>Tekrar dene</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={styles.restoreButton}
+                onPress={restorePurchases}
+                disabled={purchaseLoading}
+              >
+                <Text style={styles.restoreButtonText}>
+                  Satın alımları geri yükle
+                </Text>
+              </TouchableOpacity>
+              <Text style={styles.proFootnote}>
+                Ödeme, Apple Kimliğiniz üzerinden aylık yenilenir. İstediğiniz
+                zaman App Store aboneliklerinden yönetebilirsiniz.
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.proFootnote}>
+              Bu özelliği yalnızca şantiye yöneticisi etkinleştirebilir.
+            </Text>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="Taşeron Takibi" leftMenuIcon />
+      <Header title="Taşeron Takibi" leftMenuIcon accountIcon />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -242,6 +625,10 @@ export default function ContractorsScreen() {
               </View>
               <Text style={styles.formTitle}>Yeni Taşeron</Text>
             </View>
+            <Text style={styles.costNotice}>
+              Anlaşma bedeli genel maliyete eklenir. Aynı işçilik bedelini
+              metraj birim fiyatına tekrar eklemeyin.
+            </Text>
 
             <View style={styles.row}>
               <View style={[styles.fieldGroup, styles.half]}>
@@ -498,6 +885,114 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
 
+  proLoading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  proScreen: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 56,
+    alignItems: "center",
+  },
+
+  proIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#EAF2FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+
+  proTitle: {
+    fontSize: 25,
+    fontWeight: "800",
+    color: COLORS.text,
+    textAlign: "center",
+  },
+
+  proSubtitle: {
+    marginTop: 10,
+    color: COLORS.textSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+
+  proFeatures: {
+    alignSelf: "stretch",
+    marginTop: 30,
+    marginBottom: 28,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: 18,
+    padding: 18,
+    gap: 15,
+  },
+
+  proFeature: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  proFeatureText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.text,
+    fontWeight: "600",
+  },
+
+  proButton: {
+    alignSelf: "stretch",
+    minHeight: 54,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 15,
+    backgroundColor: COLORS.primary,
+  },
+
+  proButtonDisabled: {
+    backgroundColor: "#94A3B8",
+  },
+
+  proPrice: {
+    marginBottom: 10,
+    color: COLORS.primary,
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+
+  proButtonText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  restoreButton: {
+    paddingVertical: 16,
+    alignItems: "center",
+  },
+
+  restoreButtonText: {
+    color: COLORS.primary,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  proFootnote: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+  },
+
   keyboardView: {
     flex: 1,
   },
@@ -605,6 +1100,15 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "800",
     color: COLORS.text,
+  },
+  costNotice: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
   },
 
   row: {
