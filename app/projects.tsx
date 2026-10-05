@@ -1,11 +1,10 @@
 import Header from "@/components/Header";
 import ProjectCard from "@/components/ProjectCard";
-import SearchBar from "@/components/SearchBar";
+import { canSeeCosts, normalizeProjectRole, projectAccessId, saveActiveProject } from "@/config/projectAccess";
 import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { Project } from "@/types/projects";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import {
   addDoc,
@@ -15,10 +14,12 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
+  setDoc,
   updateDoc,
 } from "firebase/firestore";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -41,8 +42,9 @@ export default function ProjectsScreen() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
+  const [joinVisible, setJoinVisible] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
   const [newName, setNewName] = useState("");
-  const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const router = useRouter();
@@ -54,7 +56,7 @@ export default function ProjectsScreen() {
       duration: 500,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [headerFade]);
   useEffect(() => {
     const unsubAuth = auth.onAuthStateChanged((u) => setUser(u));
     return unsubAuth;
@@ -68,14 +70,20 @@ export default function ProjectsScreen() {
       orderBy("createdAt", "desc"),
     );
 
+    let ownProjects: Project[] = [];
+    let sharedProjects: Project[] = [];
+    const sync = () => setProjects([...ownProjects, ...sharedProjects]);
+
     const unsub = onSnapshot(
       q,
       (snap) => {
-        const data = snap.docs.map((d) => ({
+        ownProjects = snap.docs.map((d) => ({
           id: d.id,
           ...d.data(),
+          ownerId: user.uid,
+          role: "owner",
         })) as Project[];
-        setProjects(data);
+        sync();
         setLoading(false);
       },
       (error) => {
@@ -84,8 +92,33 @@ export default function ProjectsScreen() {
       },
     );
 
-    return unsub;
-  }, [user?.uid]); // ✅ user değişince listener yeniden kurulur
+    const unsubShared = onSnapshot(
+      collection(db, "users", user.uid, "projectAccess"),
+      (snap) => {
+        sharedProjects = snap.docs.map((d) => ({
+          id: d.data().projectId,
+          name: d.data().projectName,
+          ownerId: d.data().ownerId,
+          role: normalizeProjectRole(d.data().role),
+          shared: true,
+          totalCost: 0,
+          createdAt: d.data().joinedAt,
+        })) as Project[];
+        sync();
+        setLoading(false);
+      },
+      (error) => {
+        if (error.code !== "permission-denied")
+          console.error("Paylaşılan şantiyeler yüklenemedi:", error);
+        setLoading(false);
+      },
+    );
+
+    return () => {
+      unsub();
+      unsubShared();
+    };
+  }, [user]); // ✅ user değişince listener yeniden kurulur
   const handleAdd = async () => {
     if (!newName.trim() || !user) return;
     setAdding(true);
@@ -96,17 +129,120 @@ export default function ProjectsScreen() {
           { name: newName.trim() },
         );
       } else {
-        await addDoc(collection(db, "users", user.uid, "projects"), {
-          name: newName.trim(),
-          createdAt: serverTimestamp(),
-          totalCost: 0,
+        const projectRef = await addDoc(
+          collection(db, "users", user.uid, "projects"),
+          {
+            name: newName.trim(),
+            ownerId: user.uid,
+            createdAt: serverTimestamp(),
+            totalCost: 0,
+          },
+        );
+        await setDoc(doc(projectRef, "members", user.uid), {
+          uid: user.uid,
+          email: user.email ?? "",
+          displayName: user.displayName ?? "Proje sahibi",
+          role: "owner",
+          joinedAt: serverTimestamp(),
         });
       }
       setNewName("");
       setEditingProject(null);
       setModalVisible(false);
     } catch {
-      Alert.alert("İşlem Başarısız", "Şantiye adı kaydedilemedi. Tekrar deneyin.");
+      Alert.alert(
+        "İşlem Başarısız",
+        "Şantiye adı kaydedilemedi. Tekrar deneyin.",
+      );
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    if (!user || !inviteCode.trim()) return;
+    setAdding(true);
+    try {
+      const code = inviteCode.trim().toUpperCase();
+      let joinedProjectName = "Şantiye";
+      await runTransaction(db, async (transaction) => {
+        const inviteRef = doc(db, "projectInvites", code);
+        const inviteSnap = await transaction.get(inviteRef);
+        if (!inviteSnap.exists()) throw new Error("INVITE_NOT_FOUND");
+
+        const invite = inviteSnap.data();
+        if (invite.active !== true || invite.redeemedBy) {
+          throw new Error("INVITE_USED");
+        }
+        if (invite.expiresAt?.toDate?.() < new Date()) {
+          throw new Error("INVITE_EXPIRED");
+        }
+
+        joinedProjectName = invite.projectName;
+        const accessId = projectAccessId(invite.ownerId, invite.projectId);
+        transaction.set(
+          doc(
+            db,
+            "users",
+            invite.ownerId,
+            "projects",
+            invite.projectId,
+            "members",
+            user.uid,
+          ),
+          {
+            uid: user.uid,
+            email: user.email ?? "",
+            displayName: user.displayName ?? user.email ?? "Ekip üyesi",
+            role: invite.role,
+            inviteCode: code,
+            joinedAt: serverTimestamp(),
+          },
+        );
+        transaction.set(doc(db, "users", user.uid, "projectAccess", accessId), {
+          ownerId: invite.ownerId,
+          projectId: invite.projectId,
+          projectName: invite.projectName,
+          role: invite.role,
+          inviteCode: code,
+          joinedAt: serverTimestamp(),
+        });
+        transaction.update(inviteRef, {
+          active: false,
+          redeemedBy: user.uid,
+          redeemedAt: serverTimestamp(),
+        });
+      });
+      setInviteCode("");
+      setJoinVisible(false);
+      Alert.alert(
+        "Şantiyeye katıldınız",
+        `${joinedProjectName} artık listenizde. Davet kodu kullanıldı ve kapatıldı.`,
+      );
+    } catch (error) {
+      console.error(error);
+      const reason = error instanceof Error ? error.message : "";
+      if (reason === "INVITE_USED") {
+        Alert.alert(
+          "Kod daha önce kullanılmış",
+          "Her davet kodu yalnızca bir kişi tarafından kullanılabilir.",
+        );
+      } else if (reason === "INVITE_EXPIRED") {
+        Alert.alert(
+          "Kodun süresi dolmuş",
+          "Yöneticiden yeni bir davet kodu isteyin.",
+        );
+      } else if (reason === "INVITE_NOT_FOUND") {
+        Alert.alert(
+          "Kod geçersiz",
+          "Davet kodunu kontrol edip tekrar deneyin.",
+        );
+      } else {
+        Alert.alert(
+          "Katılım başarısız",
+          "Kod kullanılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
+        );
+      }
     } finally {
       setAdding(false);
     }
@@ -144,24 +280,12 @@ export default function ProjectsScreen() {
     ]);
   };
 
-  const totalAll = projects.reduce((s, p) => s + (p.totalCost ?? 0), 0);
-  const normalize = (text: string) =>
-    text
-      .toLowerCase()
-      .replace(/ı/g, "i")
-      .replace(/ğ/g, "g")
-      .replace(/ü/g, "u")
-      .replace(/ş/g, "s")
-      .replace(/ö/g, "o")
-      .replace(/ç/g, "c");
-
-  const filteredProjects = useMemo(() => {
-    const term = normalize(search.trim());
-    if (!term) return projects;
-
-    return projects.filter((project) => normalize(project.name).includes(term));
-  }, [projects, search]);
-
+  const costVisibleProjects = projects.filter((project) => canSeeCosts(project.role));
+  const totalAll = costVisibleProjects.reduce(
+    (sum, project) => sum + (project.totalCost ?? 0),
+    0,
+  );
+  const hasCostAccess = costVisibleProjects.length > 0;
   return (
     <SafeAreaView style={styles.container}>
       {/* ── Header ── */}
@@ -183,13 +307,17 @@ export default function ProjectsScreen() {
 
         {/* Özet şerit */}
         <View style={styles.summaryStrip}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryItemLabel}>Toplam Maliyet</Text>
-            <Text style={styles.summaryItemValue}>
-              ₺{totalAll.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
-            </Text>
-          </View>
-          <View style={styles.summaryDivider} />
+          {hasCostAccess && (
+            <>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryItemLabel}>Toplam Maliyet</Text>
+                <Text style={styles.summaryItemValue}>
+                  ₺{totalAll.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
+                </Text>
+              </View>
+              <View style={styles.summaryDivider} />
+            </>
+          )}
           <View style={styles.summaryItem}>
             <Text style={styles.summaryItemLabel}>Şantiye Sayısı</Text>
             <Text style={styles.summaryItemValue}>{projects.length}</Text>
@@ -197,16 +325,22 @@ export default function ProjectsScreen() {
         </View>
       </Animated.View>
 
-      <SearchBar
-        value={search}
-        onChange={setSearch}
-        placeholder="Şantiye ara..."
-      />
+      <TouchableOpacity
+        style={styles.joinButton}
+        onPress={() => setJoinVisible(true)}
+      >
+        <MaterialCommunityIcons
+          name="account-plus-outline"
+          size={18}
+          color={COLORS.primary}
+        />
+        <Text style={styles.joinButtonText}>Davet koduyla şantiyeye katıl</Text>
+      </TouchableOpacity>
 
       {/* ── Liste başlığı ── */}
       <View style={styles.listHeader}>
         <Text style={styles.listHeaderText}>
-          {search.trim() ? "ARAMA SONUÇLARI" : "TÜM ŞANTİYELER"}
+          TÜM ŞANTİYELER
         </Text>
         <View style={styles.listHeaderLine} />
       </View>
@@ -217,7 +351,7 @@ export default function ProjectsScreen() {
         </View>
       ) : (
         <FlatList
-          data={filteredProjects}
+          data={projects}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
@@ -231,14 +365,10 @@ export default function ProjectsScreen() {
                 />
               </View>
               <Text style={styles.emptyTitle}>
-                {search.trim()
-                  ? "Eşleşen şantiye bulunamadı"
-                  : "Henüz şantiye eklenmedi"}
+                Henüz şantiye eklenmedi
               </Text>
               <Text style={styles.emptySub}>
-                {search.trim()
-                  ? "Farklı bir arama deneyin veya yeni bir şantiye ekleyin"
-                  : "Sağ alttaki + butonuna basarak\nilk şantiyenizi oluşturun"}
+                Sağ alttaki + butonuna basarak{"\n"}ilk şantiyenizi oluşturun
               </Text>
             </View>
           }
@@ -247,12 +377,42 @@ export default function ProjectsScreen() {
               item={item}
               index={index}
               onPress={async () => {
-                await AsyncStorage.setItem("activeProjectId", item.id);
-
-                router.push(`/(tabs)?projectId=${item.id}`);
+                const ownerId = item.ownerId ?? user!.uid;
+                const role = normalizeProjectRole(item.role);
+                await saveActiveProject({
+                  id: item.id,
+                  ownerId,
+                  role,
+                  name: item.name,
+                });
+                const pathname = role === "office" ? "/(tabs)/daily" : "/(tabs)";
+                router.replace({
+                  pathname,
+                  params: {
+                    projectId: item.id,
+                    ownerId,
+                    role,
+                    projectName: item.name,
+                  },
+                } as never);
               }}
-              onEditPress={() => openRenameModal(item)}
-              onLongPress={() => handleDelete(item)}
+              onEditPress={
+                item.shared ? undefined : () => openRenameModal(item)
+              }
+              onLongPress={item.shared ? undefined : () => handleDelete(item)}
+              onTeamPress={
+                item.shared
+                  ? undefined
+                  : () =>
+                      router.push({
+                        pathname: "/project-team",
+                        params: {
+                          projectId: item.id,
+                          ownerId: user!.uid,
+                          projectName: item.name,
+                        },
+                      } as never)
+              }
             />
           )}
         />
@@ -278,17 +438,18 @@ export default function ProjectsScreen() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <TouchableOpacity
-            style={{ flex: 1 }}
-            onPress={closeModal}
-          />
+          <TouchableOpacity style={{ flex: 1 }} onPress={closeModal} />
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
 
             <View style={styles.modalHeaderRow}>
               <View style={styles.modalIconBox}>
                 <MaterialCommunityIcons
-                  name={editingProject ? "pencil-outline" : "office-building-plus-outline"}
+                  name={
+                    editingProject
+                      ? "pencil-outline"
+                      : "office-building-plus-outline"
+                  }
                   size={20}
                   color="#0058be"
                 />
@@ -298,7 +459,9 @@ export default function ProjectsScreen() {
                   {editingProject ? "Şantiye İsmini Değiştir" : "Yeni Şantiye"}
                 </Text>
                 <Text style={styles.modalSub}>
-                  {editingProject ? "Yeni şantiye ismini yazın" : "Şantiyenize bir isim verin"}
+                  {editingProject
+                    ? "Yeni şantiye ismini yazın"
+                    : "Şantiyenize bir isim verin"}
                 </Text>
               </View>
             </View>
@@ -336,7 +499,11 @@ export default function ProjectsScreen() {
               ) : (
                 <>
                   <Ionicons
-                    name={editingProject ? "checkmark-circle-outline" : "add-circle-outline"}
+                    name={
+                      editingProject
+                        ? "checkmark-circle-outline"
+                        : "add-circle-outline"
+                    }
                     size={20}
                     color="#fff"
                   />
@@ -344,6 +511,58 @@ export default function ProjectsScreen() {
                     {editingProject ? "İsmi Kaydet" : "Şantiyeyi Ekle"}
                   </Text>
                 </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={joinVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setJoinVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            onPress={() => setJoinVisible(false)}
+          />
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Şantiyeye Katıl</Text>
+            <Text style={styles.modalSub}>
+              Yöneticinin paylaştığı davet kodunu girin.
+            </Text>
+            <View style={styles.inputWrapper}>
+              <MaterialCommunityIcons
+                name="key-outline"
+                size={18}
+                color="#94a3b8"
+              />
+              <TextInput
+                style={styles.modalInput}
+                value={inviteCode}
+                onChangeText={(text) => setInviteCode(text.toUpperCase())}
+                autoCapitalize="characters"
+                placeholder="Örn: A1B2C3D4"
+              />
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.modalAddBtn,
+                (!inviteCode.trim() || adding) && { opacity: 0.5 },
+              ]}
+              onPress={handleJoin}
+              disabled={!inviteCode.trim() || adding}
+            >
+              {adding ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.modalAddText}>Katıl</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -455,6 +674,18 @@ const styles = StyleSheet.create({
 
     gap: 10,
   },
+  joinButton: {
+    marginHorizontal: 24,
+    marginTop: 14,
+    paddingVertical: 11,
+    borderRadius: 12,
+    backgroundColor: COLORS.primaryLight,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  joinButtonText: { color: COLORS.primary, fontWeight: "700", fontSize: 13 },
 
   listHeaderText: {
     fontSize: 11,

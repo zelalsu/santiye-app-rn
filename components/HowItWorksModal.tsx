@@ -84,7 +84,7 @@ export default function HowItWorksModal({
       ]).start();
       stepAnims.forEach((a) => a.setValue(0));
     }
-  }, [visible]);
+  }, [fadeAnim, slideAnim, stepAnims, visible]);
 
   return (
     <Modal

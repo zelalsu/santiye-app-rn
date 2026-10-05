@@ -1,4 +1,5 @@
 import { Project } from "@/types/projects";
+import { ROLE_LABELS, canSeeCosts } from "@/config/projectAccess";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useEffect, useRef } from "react";
 import {
@@ -15,12 +16,14 @@ export default function ProjectCard({
   onPress,
   onEditPress,
   onLongPress,
+  onTeamPress,
 }: {
   item: Project;
   index: number;
   onPress: () => void;
-  onEditPress: () => void;
-  onLongPress: () => void;
+  onEditPress?: () => void;
+  onLongPress?: () => void;
+  onTeamPress?: () => void;
 }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
@@ -42,7 +45,7 @@ export default function ProjectCard({
         friction: 14,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, index, slideAnim]);
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
@@ -93,13 +96,26 @@ export default function ProjectCard({
           <Text style={styles.projectName} numberOfLines={1}>
             {item.name}
           </Text>
-          <Text style={styles.projectCost}>₺{cost}</Text>
+          <Text style={styles.projectCost}>
+            {canSeeCosts(item.role ?? "owner")
+              ? `₺${cost}`
+              : ROLE_LABELS[item.role ?? "chief"]}
+          </Text>
         </View>
 
         <View style={styles.arrowBox}>
           <Ionicons name="chevron-forward" size={16} color="#0058be" />
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        {(onTeamPress || onEditPress || onLongPress) && <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+          {onTeamPress && <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`${item.name} ekibini yönet`}
+            onPress={onTeamPress}
+            style={[styles.actionButton, styles.editButton]}
+          >
+            <MaterialCommunityIcons name="account-group-outline" size={18} color="#1e529c" />
+          </TouchableOpacity>}
+          {onEditPress &&
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={`${item.name} adını değiştir`}
@@ -112,6 +128,8 @@ export default function ProjectCard({
               color="#1e529c"
             />
           </TouchableOpacity>
+          }
+          {onLongPress &&
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={`${item.name} şantiyesini sil`}
@@ -124,7 +142,8 @@ export default function ProjectCard({
               color="#ef4444"
             />
           </TouchableOpacity>
-        </View>
+          }
+        </View>}
       </TouchableOpacity>
     </Animated.View>
   );

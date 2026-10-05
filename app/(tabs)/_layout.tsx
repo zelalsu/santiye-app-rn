@@ -1,13 +1,25 @@
 import { COLORS } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import { Tabs } from "expo-router";
-import React from "react";
+import { Tabs, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { canSeeCosts, canUseDaily, canUseDocuments, canUseMeasurements, loadActiveProject } from "@/config/projectAccess";
+import { ProjectRole } from "@/types/projects";
 import { StyleSheet, useColorScheme, View } from "react-native";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const params = useLocalSearchParams<{ role?: ProjectRole }>();
+  const [role, setRole] = useState<ProjectRole | null>(params.role ?? null);
+
+  useEffect(() => {
+    if (params.role) {
+      setRole(params.role);
+      return;
+    }
+    loadActiveProject().then((active) => setRole(active.role));
+  }, [params.role]);
 
   return (
     <Tabs
@@ -44,7 +56,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Ana Sayfa",
+          href: role && canUseMeasurements(role) ? undefined : null,
+          title: role === "chief" ? "Metraj" : "Ana Sayfa",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
@@ -53,6 +66,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="daily"
         options={{
+          href: role && canUseDaily(role) ? undefined : null,
           title: "Günlük",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar" size={size} color={color} />
@@ -62,6 +76,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="contractors"
         options={{
+          href: role && canSeeCosts(role) ? undefined : null,
           title: "Taşeron",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="people" size={size} color={color} />
@@ -71,6 +86,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="(documents)"
         options={{
+          href: role && canUseDocuments(role) ? undefined : null,
           title: "Belgeler",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="documents" size={size} color={color} />

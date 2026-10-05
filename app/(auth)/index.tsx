@@ -66,6 +66,7 @@ export default function LoginScreen() {
         });
       }
 
+      if (router.canDismiss()) router.dismissAll();
       router.replace("/projects");
     } catch (e: any) {
       console.log(e);
@@ -263,7 +264,11 @@ export default function LoginScreen() {
             style={styles.privacyLink}
             onPress={() => WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL)}
           >
-            <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.primary} />
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={16}
+              color={COLORS.primary}
+            />
             <Text style={styles.privacyLinkText}>Gizlilik Politikası</Text>
           </TouchableOpacity>
         </ScrollView>

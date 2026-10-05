@@ -9,6 +9,7 @@ export default function Header({
   subtitle,
   leftMenuIcon,
   backIcon,
+  accountIcon,
   rightIcon,
   onRightIconPress,
 }: {
@@ -16,6 +17,7 @@ export default function Header({
   subtitle?: string;
   leftMenuIcon?: boolean;
   backIcon?: boolean;
+  accountIcon?: boolean;
   rightIcon?: string;
   onRightIconPress?: () => void;
 }) {
@@ -26,11 +28,13 @@ export default function Header({
       <View style={styles.headerMain}>
         {leftMenuIcon && (
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => router.replace("/projects")}
             style={styles.iconBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Şantiyeler ekranına dön"
           >
             <MaterialCommunityIcons
-              name="office-building-plus-outline"
+              name="office-building-outline"
               size={20}
               color="#64748b"
             />
@@ -54,14 +58,24 @@ export default function Header({
           <Text style={styles.headerMainTitle}>{title}</Text>
           {subtitle && <Text style={styles.headerMainMeta}>{subtitle}</Text>}
         </View>
-        {rightIcon && (
-          <TouchableOpacity onPress={onRightIconPress} style={styles.iconBtn}>
-            <MaterialCommunityIcons
-              name={rightIcon as any}
-              size={20}
-              color="#64748b"
-            />
-          </TouchableOpacity>
+        {(rightIcon || accountIcon) && (
+          <View style={styles.headerActions}>
+            {rightIcon && (
+              <TouchableOpacity onPress={onRightIconPress} style={styles.iconBtn}>
+                <MaterialCommunityIcons name={rightIcon as any} size={20} color="#64748b" />
+              </TouchableOpacity>
+            )}
+            {accountIcon && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Hesabım"
+                onPress={() => router.push("/account")}
+                style={styles.iconBtn}
+              >
+                <MaterialCommunityIcons name="account-outline" size={21} color="#64748b" />
+              </TouchableOpacity>
+            )}
+          </View>
         )}
       </View>
     </View>
@@ -105,6 +119,7 @@ const styles = StyleSheet.create({
   headerMainText: {
     flex: 1,
   },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
 
   headerMainSub: {
     fontSize: 11,

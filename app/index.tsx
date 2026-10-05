@@ -134,7 +134,7 @@ export default function App() {
         onClose={() => setHowItWorksVisible(false)}
         onStart={() => {
           setHowItWorksVisible(false);
-          router.replace("/projects");
+          router.replace("/(auth)");
         }}
       />
     </SafeAreaView>
