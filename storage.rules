@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function memberPath(ownerId, projectId) {
+      return /databases/(default)/documents/users/$(ownerId)/projects/$(projectId)/members/$(request.auth.uid);
+    }
+    function hasDocumentReadRole(ownerId, projectId) {
+      return firestore.exists(memberPath(ownerId, projectId))
+        && firestore.get(memberPath(ownerId, projectId)).data.role in ["owner", "manager", "office"];
+    }
+    function hasDocumentWriteRole(ownerId, projectId) {
+      return firestore.exists(memberPath(ownerId, projectId))
+        && firestore.get(memberPath(ownerId, projectId)).data.role in ["owner", "manager"];
+    }
+    function canReadDocuments(ownerId, projectId) {
+      return signedIn() && (request.auth.uid == ownerId || hasDocumentReadRole(ownerId, projectId));
+    }
+    function canWriteDocuments(ownerId, projectId) {
+      return signedIn() && (request.auth.uid == ownerId || hasDocumentWriteRole(ownerId, projectId));
+    }
+    match /users/{ownerId}/projects/{projectId}/{allPaths=**} {
+      allow read: if canReadDocuments(ownerId, projectId);
+      allow write: if canWriteDocuments(ownerId, projectId);
+    }
+  }
+}

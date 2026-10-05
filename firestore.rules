@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isOwner(ownerId) { return signedIn() && request.auth.uid == ownerId; }
+    function member(ownerId, projectId) {
+      return get(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/members/$(request.auth.uid));
+    }
+    function role(ownerId, projectId) {
+      return isOwner(ownerId) ? "owner" : member(ownerId, projectId).data.role;
+    }
+    function isManager(ownerId, projectId) {
+      return isOwner(ownerId) || (member(ownerId, projectId).data.role in ["owner", "manager"]);
+    }
+    function isChief(ownerId, projectId) {
+      return isManager(ownerId, projectId) || member(ownerId, projectId).data.role in ["chief", "field"];
+    }
+    function isWorker(ownerId, projectId) {
+      return isChief(ownerId, projectId);
+    }
+    function isOffice(ownerId, projectId) {
+      return member(ownerId, projectId).data.role == "office";
+    }
+    function canReadDaily(ownerId, projectId) {
+      return isWorker(ownerId, projectId) || isOffice(ownerId, projectId);
+    }
+    function canManageDocuments(ownerId, projectId) {
+      return isManager(ownerId, projectId);
+    }
+    function hasContractorPro(ownerId, projectId) {
+      return exists(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/subscriptions/contractorPro)
+        && get(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/subscriptions/contractorPro).data.active == true;
+    }
+    function canReadDocuments(ownerId, projectId) {
+      return canManageDocuments(ownerId, projectId) || isOffice(ownerId, projectId);
+    }
+    function validInvite(code, ownerId, projectId, invitedRole) {
+      let invite = get(/databases/$(database)/documents/projectInvites/$(code));
+      return invite.data.active == true
+        && invite.data.ownerId == ownerId
+        && invite.data.projectId == projectId
+        && invite.data.role == invitedRole
+        && invite.data.expiresAt > request.time;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /projectAccess/{accessId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasAll(["ownerId", "projectId", "role", "inviteCode"])
+          && validInvite(request.resource.data.inviteCode, request.resource.data.ownerId, request.resource.data.projectId, request.resource.data.role);
+        allow update, delete: if isManager(resource.data.ownerId, resource.data.projectId);
+      }
+
+      match /projects/{projectId} {
+        allow create: if isOwner(userId);
+        allow read, update, delete: if isManager(userId, projectId);
+
+        match /members/{memberId} {
+          allow read: if isManager(userId, projectId) || request.auth.uid == memberId;
+          allow create: if isManager(userId, projectId) || (
+            request.auth.uid == memberId
+            && request.resource.data.keys().hasAll(["role", "inviteCode"])
+            && validInvite(request.resource.data.inviteCode, userId, projectId, request.resource.data.role)
+          );
+          allow update: if isManager(userId, projectId) && memberId != userId;
+          allow delete: if (isManager(userId, projectId) && memberId != userId)
+            || request.auth.uid == memberId;
+        }
+
+        match /categories/{document=**} {
+          allow read, write: if isManager(userId, projectId);
+        }
+        match /measurements/{measurementId} {
+          allow read, write: if isManager(userId, projectId)
+            || (isChief(userId, projectId) && measurementId != "yevmiye");
+        }
+        match /pdfHistory/{document=**} {
+          allow read, write: if isManager(userId, projectId);
+        }
+        match /contractors/{document=**} {
+          // Toplam maliyet hesaplanırken mevcut taşeron kayıtları da okunur.
+          // Pro, yeni kayıt ekleme/değiştirme yetkisini kontrol eder; aksi halde
+          // günlük veya metraj kaydedildikten sonra maliyet hesabı permission-denied
+          // ile kesiliyordu.
+          allow read: if isManager(userId, projectId);
+          allow write: if isManager(userId, projectId) && hasContractorPro(userId, projectId);
+        }
+        match /subscriptions/{subscriptionId} {
+          allow read: if isManager(userId, projectId);
+          allow write: if false;
+        }
+        match /dailyLogs/{logId} {
+          allow read, write: if isManager(userId, projectId);
+        }
+        match /siteLogs/{logId} {
+          allow read: if canReadDaily(userId, projectId);
+          allow create: if isWorker(userId, projectId)
+            && !("dailyExpense" in request.resource.data)
+            && request.resource.data.authorId == request.auth.uid
+            && (!("approvalStatus" in request.resource.data)
+              || request.resource.data.approvalStatus in ["pending", "not_required"]);
+          allow update: if isManager(userId, projectId)
+            || (isWorker(userId, projectId)
+              && resource.data.authorId == request.auth.uid
+              && request.resource.data.authorId == request.auth.uid
+              // Eski kayıtlarda dailyExpense alanı bulunabilir. Bu alanın
+              // değiştirilmesini affectedKeys aşağıda zaten engelliyor; varlığı
+              // şefin kendi saha kaydını düzenlemesini engellememeli.
+              && (
+                request.resource.data.approvalStatus == resource.data.approvalStatus
+                || (
+                  resource.data.approvalStatus == "rejected"
+                  && request.resource.data.approvalStatus == "pending"
+                )
+              )
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                "date", "workArea", "workType", "workDone", "quantity", "unit",
+                "workerCount", "materials", "issues", "measurementCategoryId",
+                "measurementCategoryTitle", "measurementItemLabel", "approvalStatus",
+                "updatedAt"
+              ]));
+          allow delete: if isManager(userId, projectId)
+            || (isWorker(userId, projectId) && resource.data.authorId == request.auth.uid);
+        }
+        match /dailyLogCosts/{costId} {
+          allow read, write: if isManager(userId, projectId);
+        }
+
+        match /documentSections/{sectionId} {
+          allow read: if canReadDocuments(userId, projectId);
+          allow write: if canManageDocuments(userId, projectId);
+        }
+        match /phases/{phaseId}/documents/{documentId} {
+          allow read: if canReadDocuments(userId, projectId);
+          allow write: if canManageDocuments(userId, projectId);
+        }
+      }
+    }
+
+    match /projectInvites/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn() && resource.data.createdBy == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update: if signedIn() && (
+        resource.data.createdBy == request.auth.uid
+        || (
+          resource.data.active == true
+          && request.resource.data.active == false
+          && request.resource.data.redeemedBy == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["active", "redeemedBy", "redeemedAt"])
+        )
+      );
+      allow delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+    }
+  }
+}
