@@ -26,6 +26,22 @@ export const COLORS = {
   dangerBorder: "#fecaca",
 };
 
+// Expo'nun ortak temalı bileşenleri için geriye dönük renk haritası.
+export const Colors = {
+  light: {
+    text: COLORS.text,
+    background: COLORS.background,
+    tint: COLORS.primary,
+    icon: COLORS.textSecondary,
+  },
+  dark: {
+    text: COLORS.text,
+    background: COLORS.background,
+    tint: COLORS.primary,
+    icon: COLORS.textSecondary,
+  },
+};
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */
