@@ -1,20 +1,22 @@
 // screens/CategoryScreen.tsx
-import { CategoryConfig, EntryTemplate } from "@/config/categoryConfig";
+import { CategoryConfig, EntryTemplate, UnitType } from "@/config/categoryConfig";
+import { recalculateProjectTotal } from "@/config/projectCosts";
 import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
+import { canSeeCosts, canUseMeasurements, loadActiveProject } from "@/config/projectAccess";
+import { ProjectRole } from "@/types/projects";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import {
-  collection,
   deleteDoc,
   doc,
-  getDocs,
   onSnapshot,
   setDoc,
-  updateDoc,
 } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
+  Modal,
   Platform,
   ScrollView,
   StatusBar,
@@ -39,59 +41,102 @@ interface Props {
   config: CategoryConfig;
 }
 
-export default function CategoryScreen({ config }: Props) {
-  const { projectId } = useLocalSearchParams<{ projectId: string }>();
-  const user = auth.currentUser;
+const normalizeLabel = (value: string) =>
+  value
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ı/g, "i")
+    .replace(/ø/g, "")
+    .replace(/\b(lik|lık|luk|lük)\b/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
 
-  const [entries, setEntries] = useState<Entry[]>([]);
+export default function CategoryScreen({ config }: Props) {
+  const { projectId, ownerId } = useLocalSearchParams<{ projectId: string; ownerId?: string }>();
+  const user = auth.currentUser;
+  const projectOwnerId = ownerId ?? user?.uid ?? "";
+
+  const [measurementEntries, setMeasurementEntries] = useState<Entry[]>([]);
+  const [pricingEntries, setPricingEntries] = useState<Entry[]>([]);
+  const [role, setRole] = useState<ProjectRole | null>(null);
   const [total, setTotal] = useState(0);
   const [label, setLabel] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [unit, setUnit] = useState(config.unit);
   const [unitPrice, setUnitPrice] = useState("");
+  const [showUnitPicker, setShowUnitPicker] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [isCustomLabel, setIsCustomLabel] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const customLabelRef = useRef<TextInput>(null);
   const unitPriceRef = useRef<TextInput>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const availableUnits: UnitType[] = config.units ?? [config.unit];
+  const canChooseUnit = availableUnits.length > 1;
 
   useEffect(() => {
-    if (!user || !projectId) return;
-    const catRef = doc(
+    loadActiveProject().then((active) => {
+      const allowed = canUseMeasurements(active.role) && (config.id !== "yevmiye" || canSeeCosts(active.role));
+      setRole(active.role);
+      if (!allowed) router.replace("/projects");
+    });
+  }, [config.id]);
+
+  useEffect(() => {
+    if (!user || !projectId || !role || (config.id === "yevmiye" && !canSeeCosts(role))) return;
+    const measurementRef = doc(
       db,
       "users",
-      user.uid,
+      projectOwnerId,
       "projects",
       projectId,
-      "categories",
+      "measurements",
       config.id,
     );
+    const unsubMeasurements = onSnapshot(
+      measurementRef,
+      (snap) => {
+        setMeasurementEntries((snap.data()?.entries ?? []).map((entry: Entry) => ({ ...entry, unitPrice: 0, total: 0 })));
+      },
+      (error) => console.error(`${config.title} metrajı yüklenemedi:`, error),
+    );
 
-    const unsub = onSnapshot(catRef, (snap) => {
-      if (snap.exists()) {
-        setEntries(snap.data().entries ?? []);
-        setTotal(snap.data().total ?? 0);
-      } else {
-        setEntries([]);
-        setTotal(0);
-      }
+    if (!canSeeCosts(role ?? undefined)) return unsubMeasurements;
+
+    const pricingRef = doc(db, "users", projectOwnerId, "projects", projectId, "categories", config.id);
+    const unsubPricing = onSnapshot(
+      pricingRef,
+      (snap) => {
+        const priced = snap.data()?.entries ?? [];
+        setPricingEntries(priced);
+        setTotal(snap.data()?.total ?? 0);
+      },
+      (error) => console.error(`${config.title} fiyatları yüklenemedi:`, error),
+    );
+
+    return () => { unsubMeasurements(); unsubPricing(); };
+  }, [projectId, config.id, config.title, projectOwnerId, role, user]);
+
+  const entries = useMemo(() => {
+    const source = canSeeCosts(role ?? undefined)
+      ? [
+          ...pricingEntries.filter(
+            (priced) => !measurementEntries.some((measurement) => measurement.id === priced.id),
+          ),
+          ...measurementEntries,
+        ]
+      : measurementEntries;
+    return source.map((measurement) => {
+      const priced = pricingEntries.find((entry) => entry.id === measurement.id);
+      const unitPrice = canSeeCosts(role ?? undefined) ? priced?.unitPrice ?? 0 : 0;
+      return { ...measurement, unitPrice, total: measurement.quantity * unitPrice };
     });
-
-    return unsub;
-  }, [projectId, config.id]);
+  }, [measurementEntries, pricingEntries, role]);
 
   // Proje toplam maliyetini güncelle
   const updateProjectTotal = async () => {
     if (!user || !projectId) return;
-    const allCatsSnap = await getDocs(
-      collection(db, "users", user.uid, "projects", projectId, "categories"),
-    );
-    const grandTotal = allCatsSnap.docs.reduce(
-      (sum, d) => sum + (d.data().total ?? 0),
-      0,
-    );
-    await updateDoc(doc(db, "users", user.uid, "projects", projectId), {
-      totalCost: grandTotal,
-    });
+    await recalculateProjectTotal(projectOwnerId, projectId);
   };
 
   const handleSelectTemplate = (t: EntryTemplate) => {
@@ -112,6 +157,7 @@ export default function CategoryScreen({ config }: Props) {
     setLabel("");
     setIsCustomLabel(false);
     setQuantity("");
+    setUnit(config.unit);
     setUnitPrice("");
     setEditingEntryId(null);
     setShowTemplates(false);
@@ -120,15 +166,16 @@ export default function CategoryScreen({ config }: Props) {
   const handleAddEntry = async () => {
     const qty = parseFloat(quantity.replace(",", "."));
     const price = parseFloat(unitPrice.replace(",", "."));
-    if (!qty || !price || !label.trim() || !user || !projectId) return;
+    const showCosts = canSeeCosts(role ?? undefined);
+    if (!qty || (showCosts && !price) || !label.trim() || !user || !projectId) return;
 
     const newEntry: Entry = {
       id: editingEntryId ?? (uuid.v4() as string),
       label: label.trim(),
       quantity: qty,
-      unit: config.unit,
-      unitPrice: price,
-      total: qty * price,
+      unit,
+      unitPrice: showCosts ? price : 0,
+      total: showCosts ? qty * price : 0,
     };
 
     const updatedEntries = editingEntryId
@@ -136,59 +183,102 @@ export default function CategoryScreen({ config }: Props) {
           entry.id === editingEntryId ? newEntry : entry,
         )
       : [...entries, newEntry];
-    const newTotal = updatedEntries.reduce((sum, e) => sum + e.total, 0);
+    const measurementPayload = updatedEntries.map(({ id, label, quantity, unit }) => ({ id, label, quantity, unit }));
 
-    const catRef = doc(
-      db,
-      "users",
-      user.uid,
-      "projects",
-      projectId,
-      "categories",
-      config.id,
-    );
-    await setDoc(catRef, { entries: updatedEntries, total: newTotal });
-    await updateProjectTotal();
+    try {
+      await setDoc(doc(db, "users", projectOwnerId, "projects", projectId, "measurements", config.id), {
+        entries: measurementPayload,
+      });
 
-    resetForm();
+      if (!showCosts) {
+        resetForm();
+        return;
+      }
+
+      const newTotal = updatedEntries.reduce((sum, e) => sum + e.total, 0);
+
+      const catRef = doc(
+        db,
+        "users",
+        projectOwnerId,
+        "projects",
+        projectId,
+        "categories",
+        config.id,
+      );
+      await setDoc(catRef, { entries: updatedEntries, total: newTotal });
+      await updateProjectTotal();
+
+      resetForm();
+    } catch (error) {
+      console.error(`${config.title} kaydedilemedi:`, error);
+      Alert.alert(
+        editingEntryId ? "Kalem güncellenemedi" : "Kalem eklenemedi",
+        "Bilgileriniz formda korundu. Bağlantınızı kontrol edip tekrar deneyin.",
+      );
+    }
   };
 
   const handleEditEntry = (entry: Entry) => {
-    const isTemplate = config.templates?.some(
-      (template) => template.label === entry.label,
-    );
+    const normalizedEntry = normalizeLabel(entry.label);
+    const matchingTemplate = config.templates?.find((template) => {
+      const normalizedTemplate = normalizeLabel(template.label);
+      if (normalizedTemplate === normalizedEntry) return true;
+      if (config.id !== "demir") return false;
+      const entryDiameter = entry.label.match(/\d+/)?.[0];
+      const templateDiameter = template.label.match(/\d+/)?.[0];
+      return (
+        !!entryDiameter &&
+        entryDiameter === templateDiameter &&
+        normalizedEntry.includes("insaatdemiri") &&
+        normalizedTemplate.includes("insaatdemiri")
+      );
+    });
     setEditingEntryId(entry.id);
-    setLabel(entry.label);
-    setIsCustomLabel(!isTemplate);
+    setLabel(matchingTemplate?.label ?? entry.label);
+    setIsCustomLabel(!matchingTemplate);
     setQuantity(String(entry.quantity).replace(".", ","));
+    setUnit((entry.unit as UnitType) || config.unit);
     setUnitPrice(String(entry.unitPrice).replace(".", ","));
     setShowTemplates(false);
+    setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 50);
   };
 
   const handleRemoveEntry = async (entryId: string) => {
     if (!user || !projectId) return;
 
-    const updatedEntries = entries.filter((e) => e.id !== entryId);
-    const newTotal = updatedEntries.reduce((sum, e) => sum + e.total, 0);
+    try {
+      const updatedEntries = entries.filter((e) => e.id !== entryId);
+      const measurementRef = doc(db, "users", projectOwnerId, "projects", projectId, "measurements", config.id);
+      if (updatedEntries.length === 0) await deleteDoc(measurementRef);
+      else await setDoc(measurementRef, { entries: updatedEntries.map(({ id, label, quantity, unit }) => ({ id, label, quantity, unit })) });
 
-    const catRef = doc(
-      db,
-      "users",
-      user.uid,
-      "projects",
-      projectId,
-      "categories",
-      config.id,
-    );
+      if (!canSeeCosts(role ?? undefined)) return;
 
-    if (updatedEntries.length === 0) {
-      // Son kalem silindiyse kategoriyi tamamen kaldır
-      await deleteDoc(catRef);
-    } else {
-      await setDoc(catRef, { entries: updatedEntries, total: newTotal });
+      const newTotal = updatedEntries.reduce((sum, e) => sum + e.total, 0);
+
+      const catRef = doc(
+        db,
+        "users",
+        projectOwnerId,
+        "projects",
+        projectId,
+        "categories",
+        config.id,
+      );
+
+      if (updatedEntries.length === 0) {
+        // Son kalem silindiyse kategoriyi tamamen kaldır
+        await deleteDoc(catRef);
+      } else {
+        await setDoc(catRef, { entries: updatedEntries, total: newTotal });
+      }
+
+      await updateProjectTotal();
+    } catch (error) {
+      console.error(`${config.title} silinemedi:`, error);
+      Alert.alert("Kalem silinemedi", "Lütfen tekrar deneyin.");
     }
-
-    await updateProjectTotal();
   };
 
   const previewTotal =
@@ -197,13 +287,16 @@ export default function CategoryScreen({ config }: Props) {
         parseFloat(unitPrice.replace(",", "."))
       : null;
 
-  const isFormValid = !!(label.trim() && quantity && unitPrice);
+  const isFormValid = !!(label.trim() && quantity && (canSeeCosts(role ?? undefined) ? unitPrice : true));
+
+  if (!role || !canUseMeasurements(role) || (config.id === "yevmiye" && !canSeeCosts(role))) return null;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
 
       <ScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -240,7 +333,7 @@ export default function CategoryScreen({ config }: Props) {
                   ]}
                   numberOfLines={1}
                 >
-                  {isCustomLabel ? "Diğer" : label || "Seçiniz..."}
+                  {label || (isCustomLabel ? "Diğer" : "Seçiniz...")}
                 </Text>
                 <MaterialCommunityIcons
                   name={showTemplates ? "chevron-up" : "chevron-down"}
@@ -342,7 +435,7 @@ export default function CategoryScreen({ config }: Props) {
           <View style={styles.row}>
             <View style={[styles.fieldGroup, styles.half]}>
               <Text style={styles.fieldLabel}>
-                Miktar <Text style={styles.unitHint}>({config.unit})</Text>
+                Miktar <Text style={styles.unitHint}>({unit})</Text>
               </Text>
               <TextInput
                 style={styles.input}
@@ -355,10 +448,46 @@ export default function CategoryScreen({ config }: Props) {
                 }
               />
             </View>
-            <View style={[styles.fieldGroup, styles.half]}>
+            {canChooseUnit && (
+              <View style={[styles.fieldGroup, styles.half]}>
+                <Text style={styles.fieldLabel}>Birim</Text>
+                <TouchableOpacity
+                  style={styles.unitSelector}
+                  onPress={() => setShowUnitPicker(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Birim seç: ${unit}`}
+                >
+                  <Text style={styles.unitSelectorText}>{unit}</Text>
+                  <MaterialCommunityIcons
+                    name="chevron-down"
+                    size={21}
+                    color={COLORS.textSecondary}
+                  />
+                </TouchableOpacity>
+              </View>
+            )}
+            {canSeeCosts(role) && !canChooseUnit && <View style={[styles.fieldGroup, styles.half]}>
               <Text style={styles.fieldLabel}>
                 Birim Fiyat
-                <Text style={styles.unitHint}> (₺/{config.unit})</Text>
+                <Text style={styles.unitHint}> (₺/{unit})</Text>
+              </Text>
+              <TextInput
+                ref={unitPriceRef}
+                style={styles.input}
+                placeholder="0,00"
+                placeholderTextColor="#C0C0C0"
+                keyboardType="decimal-pad"
+                value={unitPrice}
+                onChangeText={(text) =>
+                  setUnitPrice(text.replace(/[^0-9.,]/g, ""))
+                }
+              />
+            </View>}
+          </View>
+          {canSeeCosts(role) && canChooseUnit && (
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>
+                Birim Fiyat <Text style={styles.unitHint}> (₺/{unit})</Text>
               </Text>
               <TextInput
                 ref={unitPriceRef}
@@ -372,10 +501,10 @@ export default function CategoryScreen({ config }: Props) {
                 }
               />
             </View>
-          </View>
+          )}
 
           {/* Önizleme */}
-          {previewTotal !== null && !isNaN(previewTotal) && (
+          {canSeeCosts(role) && previewTotal !== null && !isNaN(previewTotal) && (
             <View style={styles.previewRow}>
               <Text style={styles.previewLabel}>Hesaplanan tutar</Text>
               <Text style={styles.previewValue}>
@@ -413,6 +542,9 @@ export default function CategoryScreen({ config }: Props) {
               Kalemler{" "}
               <Text style={styles.listHeaderCount}>({entries.length})</Text>
             </Text>
+            <Text style={styles.listEditHint}>
+              Düzenlemek için bir kaleme dokunun
+            </Text>
           </View>
         )}
 
@@ -431,12 +563,16 @@ export default function CategoryScreen({ config }: Props) {
           </View>
         ) : (
           entries.map((item, i) => (
-            <View
+            <TouchableOpacity
               key={item.id}
               style={[
                 styles.entryRow,
                 i === entries.length - 1 && { marginBottom: 0 },
               ]}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.label} kalemini düzenle`}
+              onPress={() => handleEditEntry(item)}
             >
               <View style={styles.entryIndex}>
                 <Text style={styles.entryIndexText}>{i + 1}</Text>
@@ -447,32 +583,19 @@ export default function CategoryScreen({ config }: Props) {
                   {item.label}
                 </Text>
                 <Text style={styles.entrySub}>
-                  {item.quantity} {item.unit} × ₺
-                  {item.unitPrice.toLocaleString("tr-TR")}
+                  {item.quantity} {item.unit}
+                  {canSeeCosts(role) ? ` × ₺${item.unitPrice.toLocaleString("tr-TR")}` : " • Metraj"}
                 </Text>
               </View>
 
               <View style={styles.entryRight}>
-                <Text style={styles.entryTotal}>
+                {canSeeCosts(role) && <Text style={styles.entryTotal}>
                   ₺
                   {item.total.toLocaleString("tr-TR", {
                     minimumFractionDigits: 2,
                   })}
-                </Text>
+                </Text>}
                 <View style={styles.entryActions}>
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityLabel={`${item.label} kalemini düzenle`}
-                    style={styles.editBtn}
-                    onPress={() => handleEditEntry(item)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <MaterialCommunityIcons
-                      name="pencil-outline"
-                      size={17}
-                      color={COLORS.primary}
-                    />
-                  </TouchableOpacity>
                   <TouchableOpacity
                     accessibilityRole="button"
                     accessibilityLabel={`${item.label} kalemini sil`}
@@ -488,23 +611,65 @@ export default function CategoryScreen({ config }: Props) {
                   </TouchableOpacity>
                 </View>
               </View>
-            </View>
+            </TouchableOpacity>
           ))
         )}
 
         <View style={{ height: 110 }} />
       </ScrollView>
 
+      <Modal
+        visible={showUnitPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowUnitPicker(false)}
+      >
+        <View style={styles.unitModalBackdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowUnitPicker(false)}
+            accessibilityLabel="Birim seçiciyi kapat"
+          />
+          <View style={styles.unitModalSheet}>
+            <View style={styles.unitModalHandle} />
+            <Text style={styles.unitModalTitle}>{config.title} birimini seç</Text>
+            <Text style={styles.unitModalSubtitle}>
+              Fiyat ve miktar aynı birim üzerinden hesaplanır.
+            </Text>
+            {availableUnits.map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={[styles.unitOption, unit === item && styles.unitOptionActive]}
+                onPress={() => {
+                  setUnit(item);
+                  setShowUnitPicker(false);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: unit === item }}
+              >
+                <Text style={[styles.unitOptionText, unit === item && styles.unitOptionTextActive]}>
+                  {item}
+                </Text>
+                {unit === item && (
+                  <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </Modal>
+
       {/* TOPLAM BAR */}
 
       <TouchableOpacity onPress={() => router.back()} style={styles.totalBar}>
         <View>
-          <Text style={styles.totalBarLabel}>Toplam Maliyet</Text>
+          <Text style={styles.totalBarLabel}>{canSeeCosts(role) ? "Toplam Maliyet" : "Toplam Metraj Kalemi"}</Text>
           <Text style={styles.totalBarSub}>{entries.length} kalem</Text>
         </View>
-        <Text style={styles.totalBarValue}>
+        {canSeeCosts(role) ? <Text style={styles.totalBarValue}>
           ₺{total.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
-        </Text>
+        </Text> : <Text style={styles.totalBarValue}>{entries.length}</Text>}
       </TouchableOpacity>
     </View>
   );
@@ -583,6 +748,61 @@ const styles = StyleSheet.create({
 
   row: { flexDirection: "row", gap: 10 },
   half: { flex: 1 },
+  unitSelector: {
+    minHeight: 48,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    backgroundColor: COLORS.inputBg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  unitSelectorText: { color: COLORS.text, fontSize: 15, fontWeight: "700" },
+  unitModalBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15, 23, 42, 0.42)",
+  },
+  unitModalSheet: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 34,
+  },
+  unitModalHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 4,
+    backgroundColor: COLORS.border,
+    alignSelf: "center",
+    marginBottom: 17,
+  },
+  unitModalTitle: { color: COLORS.text, fontSize: 18, fontWeight: "900" },
+  unitModalSubtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  unitOption: {
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 13,
+    paddingHorizontal: 15,
+    marginBottom: 9,
+    backgroundColor: COLORS.inputBg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  unitOptionActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryLight },
+  unitOptionText: { color: COLORS.textSecondary, fontSize: 15, fontWeight: "800" },
+  unitOptionTextActive: { color: COLORS.primary },
 
   dropdownWrapper: { marginBottom: 14 },
 
@@ -732,6 +952,11 @@ const styles = StyleSheet.create({
   listHeaderCount: {
     color: COLORS.textMuted,
   },
+  listEditHint: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: "600",
+  },
 
   emptyState: {
     alignItems: "center",
@@ -821,15 +1046,6 @@ const styles = StyleSheet.create({
   },
 
   entryActions: { flexDirection: "row", gap: 6 },
-
-  editBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: COLORS.primaryLight,
-    alignItems: "center",
-    justifyContent: "center",
-  },
 
   totalBar: {
     position: "absolute",

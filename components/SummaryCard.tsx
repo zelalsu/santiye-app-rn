@@ -7,9 +7,11 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 export default function SummaryCard({
   total,
   projectId,
+  ownerId,
 }: {
   total: number;
   projectId: string;
+  ownerId?: string;
 }) {
   return (
     <TouchableOpacity
@@ -17,7 +19,7 @@ export default function SummaryCard({
       onPress={() =>
         router.push({
           pathname: "/projectSummary",
-          params: { projectId },
+          params: { projectId, ownerId },
         })
       }
       style={styles.summaryCard}
@@ -33,9 +35,9 @@ export default function SummaryCard({
         </Text>
 
         <View style={styles.badge}>
-          <Ionicons name="trending-up" size={13} color={COLORS.white} />
+          <Ionicons name="list-outline" size={13} color={COLORS.white} />
 
-          <Text style={styles.badgeText}> Güncel Maliyet Özeti</Text>
+          <Text style={styles.badgeText}> Maliyet detaylarını gör</Text>
         </View>
       </View>
 

@@ -15,6 +15,9 @@ interface Props {
   columnWidth: number;
   categoryTotals: Record<string, number>;
   projectId: string;
+  ownerId?: string;
+  showCosts?: boolean;
+  measurementCounts?: Record<string, number>;
 }
 
 export default function CostGrid({
@@ -22,6 +25,9 @@ export default function CostGrid({
   columnWidth,
   categoryTotals,
   projectId,
+  ownerId,
+  showCosts = true,
+  measurementCounts = {},
 }: Props) {
   const router = useRouter();
 
@@ -30,8 +36,11 @@ export default function CostGrid({
       {items.map((item) => {
         const categoryTotal = categoryTotals[item.id] ?? 0;
 
-        const displayPrice =
-          categoryTotal > 0
+        const displayPrice = !showCosts
+          ? measurementCounts[item.id] > 0
+            ? `${measurementCounts[item.id]} metraj kalemi`
+            : "Metraj girilmedi"
+          : categoryTotal > 0
             ? `₺${categoryTotal.toLocaleString("tr-TR", {
                 minimumFractionDigits: 2,
               })}`
@@ -48,6 +57,8 @@ export default function CostGrid({
                 params: {
                   category: item.id,
                   projectId,
+                  ownerId,
+                  role: showCosts ? "manager" : "chief",
                 },
               })
             }

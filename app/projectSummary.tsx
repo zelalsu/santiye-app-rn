@@ -2,10 +2,11 @@ import Header from "@/components/Header";
 import PdfHistoryModal from "@/components/PdfHistoryModal";
 import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
+import { canSeeCosts, loadActiveProject } from "@/config/projectAccess";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { copyAsync, documentDirectory } from "expo-file-system/legacy";
 import * as Print from "expo-print";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
 import {
   addDoc,
@@ -35,46 +36,86 @@ interface CategoryData {
   entries: any[];
 }
 
+interface ContractorData {
+  id: string;
+  name: string;
+  workType: string;
+  contractAmount: number;
+  paidAmount: number;
+}
+
 export default function ProjectSummaryScreen() {
-  const { projectId } = useLocalSearchParams<{ projectId: string }>();
+  const { projectId, ownerId, reportMode: reportModeParam } = useLocalSearchParams<{ projectId: string; ownerId?: string; reportMode?: string }>();
+  const reportMode = reportModeParam === "true";
   const user = auth.currentUser;
+  const routeOwnerId = ownerId && ownerId !== "undefined" && ownerId !== "null" ? ownerId : "";
 
   const [loading, setLoading] = useState(true);
+  const [hasCostAccess, setHasCostAccess] = useState<boolean | null>(null);
+  const [projectOwnerId, setProjectOwnerId] = useState(routeOwnerId);
   const [projectName, setProjectName] = useState("");
   const [categories, setCategories] = useState<CategoryData[]>([]);
+  const [contractors, setContractors] = useState<ContractorData[]>([]);
+  const [additionalExpenseTotal, setAdditionalExpenseTotal] = useState(0);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
   const [pdfUri, setPdfUri] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
+  useEffect(() => {
+    loadActiveProject().then((active) => {
+      const allowed = canSeeCosts(active.role);
+      setHasCostAccess(allowed);
+      setProjectOwnerId(routeOwnerId || active.ownerId || user?.uid || "");
+      if (!allowed) router.replace("/projects");
+    });
+  }, [routeOwnerId, user?.uid]);
+
   // ─── Veri yükleme ────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    loadData();
+    if (hasCostAccess === true && projectOwnerId) loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasCostAccess, projectOwnerId]);
 
   const loadData = async () => {
     try {
-      if (!user || !projectId) return;
+      if (!user || !projectId || hasCostAccess !== true) return;
 
-      const projectRef = doc(db, "users", user.uid, "projects", projectId);
+      const projectRef = doc(db, "users", projectOwnerId, "projects", projectId);
       const projectSnap = await getDoc(projectRef);
       if (projectSnap.exists()) {
         setProjectName(projectSnap.data()?.name ?? "Proje");
       }
 
-      const categoriesSnap = await getDocs(
-        collection(db, "users", user.uid, "projects", projectId, "categories"),
-      );
+      const [categoriesResult, contractorsResult, dailyExpensesResult] = await Promise.allSettled([
+        getDocs(collection(db, "users", projectOwnerId, "projects", projectId, "categories")),
+        getDocs(collection(db, "users", projectOwnerId, "projects", projectId, "contractors")),
+        getDocs(collection(db, "users", projectOwnerId, "projects", projectId, "dailyLogCosts")),
+      ]);
 
-      const parsed: CategoryData[] = categoriesSnap.docs.map((d) => ({
+      if (categoriesResult.status === "rejected") throw categoriesResult.reason;
+
+      const parsed: CategoryData[] = categoriesResult.value.docs.map((d) => ({
         id: d.id,
         total: d.data()?.total ?? 0,
         entries: d.data()?.entries ?? [],
       }));
 
       setCategories(parsed);
+      setContractors(
+        contractorsResult.status === "fulfilled"
+          ? contractorsResult.value.docs.map((item) => ({ id: item.id, ...item.data() })) as ContractorData[]
+          : [],
+      );
+      setAdditionalExpenseTotal(
+        dailyExpensesResult.status === "fulfilled"
+          ? dailyExpensesResult.value.docs.reduce(
+              (sum, item) => sum + (item.data().amount ?? 0),
+              0,
+            )
+          : 0,
+      );
     } catch (error) {
       console.error("loadData error:", error);
     } finally {
@@ -84,10 +125,9 @@ export default function ProjectSummaryScreen() {
 
   // ─── Memoized hesaplamalar ────────────────────────────────────────────────────
 
-  const totalCost = useMemo(
-    () => categories.reduce((sum, c) => sum + c.total, 0),
-    [categories],
-  );
+  const categoryTotal = useMemo(() => categories.reduce((sum, c) => sum + c.total, 0), [categories]);
+  const contractorTotal = useMemo(() => contractors.reduce((sum, item) => sum + (item.contractAmount || 0), 0), [contractors]);
+  const totalCost = categoryTotal + contractorTotal + additionalExpenseTotal;
 
   const sortedCategories = useMemo(
     () => [...categories].sort((a, b) => b.total - a.total),
@@ -101,7 +141,7 @@ export default function ProjectSummaryScreen() {
           c.entries.map((entry) => ({
             ...entry,
             category: c.id,
-            impactScore: entry.total * (entry.quantity || 1),
+            impactScore: entry.total,
           })),
         )
         .sort((a, b) => b.impactScore - a.impactScore)
@@ -166,7 +206,11 @@ export default function ProjectSummaryScreen() {
         </tr>`;
       })
       .join("")}
+    ${contractorTotal ? `<tr><td>Taşeron Sözleşmeleri</td><td>%${totalCost ? ((contractorTotal / totalCost) * 100).toFixed(1) : "0"}</td><td class="bold">₺${contractorTotal.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td></tr>` : ""}
+    ${additionalExpenseTotal ? `<tr><td>Günlük Ek Harcamalar</td><td>%${totalCost ? ((additionalExpenseTotal / totalCost) * 100).toFixed(1) : "0"}</td><td class="bold">₺${additionalExpenseTotal.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td></tr>` : ""}
   </table>
+
+  ${contractors.length ? `<h2>Taşeron Sözleşmeleri</h2><table><tr><th>Taşeron</th><th>İş</th><th>Sözleşme</th><th>Ödenen</th></tr>${contractors.map((item) => `<tr><td>${item.name}</td><td>${item.workType}</td><td class="bold">₺${(item.contractAmount || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td><td>₺${(item.paidAmount || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td></tr>`).join("")}</table>` : ""}
 
   <h2>Tüm Kalemler</h2>
   <table>
@@ -190,7 +234,7 @@ export default function ProjectSummaryScreen() {
   // ─── PDF oluştur → önizleme aç ───────────────────────────────────────────────
 
   const handleGenerateAndPreview = async () => {
-    if (categories.length === 0) {
+    if (categories.length === 0 && contractors.length === 0) {
       Alert.alert("Veri Yok", "PDF oluşturmak için önce kalem ekleyin.");
       return;
     }
@@ -209,7 +253,7 @@ export default function ProjectSummaryScreen() {
 
       // Firestore'a kaydet
       await addDoc(
-        collection(db, "users", user!.uid, "projects", projectId, "pdfHistory"),
+        collection(db, "users", projectOwnerId, "projects", projectId, "pdfHistory"),
         {
           createdAt: serverTimestamp(),
           totalCost,
@@ -248,7 +292,7 @@ export default function ProjectSummaryScreen() {
 
   // ─── Yükleniyor ──────────────────────────────────────────────────────────────
 
-  if (loading) {
+  if (hasCostAccess !== true || loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
@@ -267,6 +311,7 @@ export default function ProjectSummaryScreen() {
         visible={historyVisible}
         onClose={() => setHistoryVisible(false)}
         projectId={projectId}
+        ownerId={projectOwnerId}
         generateHtml={generateHtml}
       />
 
@@ -335,35 +380,32 @@ export default function ProjectSummaryScreen() {
 
       {/* ─── Ana header ─── */}
       <Header
-        title="Maliyet Özeti"
+        title={reportMode ? "Maliyet Raporu" : "Maliyet Detayları"}
         backIcon
-        rightIcon="file-pdf-box"
-        onRightIconPress={() => setHistoryVisible(true)}
+        rightIcon={reportMode ? "history" : undefined}
+        onRightIconPress={reportMode ? () => setHistoryVisible(true) : undefined}
       />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* PDF Oluştur butonu */}
-        <TouchableOpacity
-          onPress={handleGenerateAndPreview}
-          style={[styles.exportBtn, pdfGenerating && { opacity: 0.7 }]}
-          disabled={pdfGenerating}
-        >
-          {pdfGenerating ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <MaterialCommunityIcons
-              name="file-pdf-box"
-              size={20}
-              color="#fff"
-            />
-          )}
-          <Text style={styles.exportBtnText}>
-            {pdfGenerating ? "Oluşturuluyor..." : "PDF Oluştur & Önizle"}
-          </Text>
-        </TouchableOpacity>
+        {reportMode && (
+          <TouchableOpacity
+            onPress={handleGenerateAndPreview}
+            style={[styles.exportBtn, pdfGenerating && { opacity: 0.7 }]}
+            disabled={pdfGenerating}
+          >
+            {pdfGenerating ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="file-pdf-box" size={20} color="#fff" />
+            )}
+            <Text style={styles.exportBtnText}>
+              {pdfGenerating ? "Oluşturuluyor..." : "PDF Oluştur & Önizle"}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* ─── KATEGORİ DAĞILIMI ─── */}
         <View style={styles.section}>
@@ -400,6 +442,14 @@ export default function ProjectSummaryScreen() {
               </View>
             );
           })}
+          {contractorTotal > 0 && <View style={styles.categoryCard}>
+            <View style={styles.categoryTop}><View><Text style={styles.categoryName}>Taşeron Sözleşmeleri</Text><Text style={styles.categoryPercent}>%{totalCost ? ((contractorTotal / totalCost) * 100).toFixed(1) : "0"}</Text></View><Text style={styles.categoryPrice}>₺{contractorTotal.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</Text></View>
+            <View style={styles.progressBg}><View style={[styles.progressFill, { width: `${totalCost ? (contractorTotal / totalCost) * 100 : 0}%` as any }]} /></View>
+          </View>}
+          {additionalExpenseTotal > 0 && <View style={styles.categoryCard}>
+            <View style={styles.categoryTop}><View><Text style={styles.categoryName}>Günlük Ek Harcamalar</Text><Text style={styles.categoryPercent}>%{totalCost ? ((additionalExpenseTotal / totalCost) * 100).toFixed(1) : "0"}</Text></View><Text style={styles.categoryPrice}>₺{additionalExpenseTotal.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</Text></View>
+            <View style={styles.progressBg}><View style={[styles.progressFill, { width: `${totalCost ? (additionalExpenseTotal / totalCost) * 100 : 0}%` as any }]} /></View>
+          </View>}
         </View>
 
         {/* ─── EN PAHALI KALEMLER ─── */}

@@ -1,6 +1,6 @@
 // config/categoryConfig.ts
 
-export type UnitType = "ton" | "m³" | "m²" | "adet" | "mt" | "set" | "gün";
+export type UnitType = "ton" | "kg" | "m³" | "m²" | "adet" | "mt" | "set" | "gün";
 
 export interface EntryTemplate {
   label: string; // Seçilince açıklama alanına dolar
@@ -12,6 +12,8 @@ export interface CategoryConfig {
   icon: string;
   unit: UnitType;
   unitLabel: string;
+  /** Bu kategorinin kayıt sırasında kullanılabilecek teknik birimleri. */
+  units?: UnitType[];
   quantityHint?: string;
   templates?: EntryTemplate[]; // Seçilebilir kalem şablonları
 }
@@ -42,6 +44,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: "crane",
     unit: "ton",
     unitLabel: "ton",
+    units: ["ton", "kg"],
     quantityHint: "Kaç ton?",
     templates: [
       { label: "İnşaat demiri Ø8" },
@@ -78,6 +81,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: "texture",
     unit: "m²",
     unitLabel: "m²",
+    units: ["m²", "kg"],
     quantityHint: "Kaç m²?",
     templates: [
       { label: "İç sıva - alçı" },
@@ -94,6 +98,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: "format-paint",
     unit: "m²",
     unitLabel: "m²",
+    units: ["m²", "kg", "adet"],
     quantityHint: "Kaç m²?",
     templates: [
       { label: "İç cephe plastik boya" },
@@ -143,6 +148,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: "grid",
     unit: "m²",
     unitLabel: "m²",
+    units: ["m²", "adet"],
     quantityHint: "Kaç m²?",
     templates: [
       { label: "Yer seramiği 30x30" },
@@ -160,6 +166,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: "lightning-bolt-outline",
     unit: "set",
     unitLabel: "set",
+    units: ["set", "adet", "mt"],
     quantityHint: "Kaç set?",
     templates: [
       { label: "Komple elektrik tesisatı (daire)" },
@@ -177,6 +184,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: "water-outline",
     unit: "set",
     unitLabel: "set",
+    units: ["set", "adet", "mt"],
     quantityHint: "Kaç set?",
     templates: [
       { label: "Komple sıhhi tesisat (daire)" },
@@ -194,6 +202,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: "home-variant-outline",
     unit: "m²",
     unitLabel: "m²",
+    units: ["m²", "mt", "adet"],
     quantityHint: "Kaç m²?",
     templates: [
       { label: "Çelik konstrüksiyon çatı" },
