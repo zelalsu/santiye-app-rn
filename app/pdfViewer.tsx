@@ -27,7 +27,7 @@ export default function PdfViewerScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Header title="PDF Hazır" backIcon="arrow-left" />
+      <Header title="PDF Hazır" backIcon />
 
       <View style={styles.content}>
         <MaterialCommunityIcons

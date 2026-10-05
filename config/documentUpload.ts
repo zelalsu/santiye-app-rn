@@ -2,6 +2,7 @@ import { db, storage } from "@/firebaseConfig";
 import * as FileSystem from "expo-file-system/legacy";
 import { addDoc, collection } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import uuid from "react-native-uuid";
 
 interface UploadResult {
   success: boolean;
@@ -38,7 +39,9 @@ export const uploadDocument = async (
     }
 
     // Storage path oluştur
-    const storagePath = `users/${userId}/projects/${projectId}/phases/${phaseId}/documents/${fileName}`;
+    const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storageName = `${Date.now()}_${String(uuid.v4()).slice(0, 8)}_${safeFileName}`;
+    const storagePath = `users/${userId}/projects/${projectId}/phases/${phaseId}/documents/${storageName}`;
     const storageRef = ref(storage, storagePath);
 
     // Dosyayı yükle
@@ -49,9 +52,14 @@ export const uploadDocument = async (
     const downloadUrl = await getDownloadURL(storageRef);
 
     // Firestore'a kaydet
+    const documentType = fileType.startsWith("image/")
+      ? "image"
+      : fileType.includes("spreadsheet") || fileType.includes("excel") || fileName.toLowerCase().endsWith(".xlsx")
+        ? "spreadsheet"
+        : "pdf";
     const docData = {
       name: fileName,
-      type: fileType.startsWith("image/") ? "image" : "pdf",
+      type: documentType,
       url: downloadUrl,
       size: fileSize,
       createdAt: new Date(),

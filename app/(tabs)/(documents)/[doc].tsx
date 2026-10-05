@@ -1,8 +1,13 @@
 import Header from "@/components/Header";
 import { uploadDocument } from "@/config/documentUpload";
+import {
+  canManageDocuments,
+  canUseDocuments,
+  loadActiveProject,
+} from "@/config/projectAccess";
 import { COLORS } from "@/constants/theme";
 import { auth, db, storage } from "@/firebaseConfig";
-import { RequiredDocument } from "@/types/phases";
+import { ProjectRole } from "@/types/projects";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { cacheDirectory, downloadAsync } from "expo-file-system/legacy";
@@ -40,7 +45,7 @@ import { WebView } from "react-native-webview";
 interface Document {
   id: string;
   name: string;
-  type: "image" | "pdf";
+  type: "image" | "pdf" | "spreadsheet";
   url: string;
   createdAt: Date;
   size?: number;
@@ -56,23 +61,25 @@ export default function DocumentDetailScreen() {
   const phaseId = Array.isArray(params.phaseId)
     ? params.phaseId[0]
     : params.phaseId;
-  const phaseTitle = Array.isArray(params.phaseTitle)
-    ? params.phaseTitle[0]
-    : params.phaseTitle;
   const projectId = Array.isArray(params.projectId)
     ? params.projectId[0]
     : params.projectId;
+  const ownerIdParam = Array.isArray(params.ownerId)
+    ? params.ownerId[0]
+    : params.ownerId;
+  const projectOwnerId = ownerIdParam || auth.currentUser?.uid;
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [uploadingForId, setUploadingForId] = useState<string | null>(null);
+  const [, setUploadingForId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [showNameModal, setShowNameModal] = useState(false);
   const [documentName, setDocumentName] = useState("");
   const [isSavingDocument, setIsSavingDocument] = useState(false);
+  const [role, setRole] = useState<ProjectRole | null>(null);
   const [pendingFile, setPendingFile] = useState<{
     uri: string;
     type: "image" | "pdf";
@@ -82,13 +89,32 @@ export default function DocumentDetailScreen() {
   const user = auth.currentUser;
 
   useEffect(() => {
+    loadActiveProject().then((active) => {
+      setRole(active.role);
+      if (!canUseDocuments(active.role)) {
+        router.replace({
+          pathname: "/(tabs)/daily",
+          params: {
+            projectId: active.id,
+            ownerId: active.ownerId,
+            role: active.role,
+          },
+        } as never);
+      }
+    });
+  }, [router]);
+
+  useEffect(() => {
+    if (!role || !canUseDocuments(role)) return;
     if (!phaseId || !projectId) {
       Alert.alert("Hata", "Geçersiz parametreler");
       router.back();
       return;
     }
     loadDocuments();
-  }, []);
+    // Bu ekran route parametreleri değiştiğinde yeniden oluşturulur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
 
   const loadDocuments = async () => {
     if (!user || !projectId || !phaseId) return;
@@ -96,7 +122,7 @@ export default function DocumentDetailScreen() {
       const docsRef = collection(
         db,
         "users",
-        user.uid,
+        projectOwnerId!,
         "projects",
         projectId,
         "phases",
@@ -127,23 +153,6 @@ export default function DocumentDetailScreen() {
       setLoading(false);
     }
   };
-
-  const handleUploadForRequired = useCallback(
-    async (reqDoc: RequiredDocument) => {
-      Alert.alert(
-        reqDoc.name,
-        "Nasıl eklemek istersiniz?",
-        [
-          { text: "İptal", style: "cancel" },
-          { text: "Fotoğraf Çek", onPress: () => pickCamera(reqDoc.id) },
-          { text: "Galeriden Seç", onPress: () => pickImage(reqDoc.id) },
-          { text: "PDF Dosyası", onPress: () => pickPDF(reqDoc.id) },
-        ],
-        { cancelable: true },
-      );
-    },
-    [],
-  );
 
   // Serbest belge ekleme (FAB)
   const handleAddDocument = useCallback(async () => {
@@ -264,7 +273,7 @@ export default function DocumentDetailScreen() {
         uri,
         fileName,
         fileType,
-        user.uid,
+        projectOwnerId!,
         projectId,
         phaseId,
         requiredDocumentId, // ← yeni parametre
@@ -314,7 +323,7 @@ export default function DocumentDetailScreen() {
               const docRef = doc(
                 db,
                 "users",
-                user.uid,
+                projectOwnerId!,
                 "projects",
                 projectId,
                 "phases",
@@ -356,10 +365,16 @@ export default function DocumentDetailScreen() {
       let uri = selectedDoc.url;
 
       if (!uri.startsWith("file://")) {
-        if (!cacheDirectory) throw new Error("Geçici depolama alanı bulunamadı.");
+        if (!cacheDirectory)
+          throw new Error("Geçici depolama alanı bulunamadı.");
 
         const safeName = selectedDoc.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const expectedExtension = selectedDoc.type === "pdf" ? ".pdf" : ".jpg";
+        const expectedExtension =
+          selectedDoc.type === "pdf"
+            ? ".pdf"
+            : selectedDoc.type === "spreadsheet"
+              ? ".xlsx"
+              : ".jpg";
         const fileName = safeName.toLowerCase().endsWith(expectedExtension)
           ? safeName
           : `${safeName}${expectedExtension}`;
@@ -373,8 +388,17 @@ export default function DocumentDetailScreen() {
 
       await Sharing.shareAsync(uri, {
         mimeType:
-          selectedDoc.type === "pdf" ? "application/pdf" : "image/jpeg",
-        UTI: selectedDoc.type === "pdf" ? "com.adobe.pdf" : "public.jpeg",
+          selectedDoc.type === "pdf"
+            ? "application/pdf"
+            : selectedDoc.type === "spreadsheet"
+              ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              : "image/jpeg",
+        UTI:
+          selectedDoc.type === "pdf"
+            ? "com.adobe.pdf"
+            : selectedDoc.type === "spreadsheet"
+              ? "org.openxmlformats.spreadsheetml.sheet"
+              : "public.jpeg",
         dialogTitle: "Belgeyi paylaş veya kaydet",
       });
     } catch (error) {
@@ -415,6 +439,12 @@ export default function DocumentDetailScreen() {
             style={styles.thumbnail}
             resizeMode="cover"
           />
+        ) : item.type === "spreadsheet" ? (
+          <MaterialCommunityIcons
+            name="microsoft-excel"
+            size={28}
+            color="#18864B"
+          />
         ) : (
           <MaterialCommunityIcons
             name="file-pdf-box"
@@ -430,7 +460,11 @@ export default function DocumentDetailScreen() {
         <View style={styles.documentMeta}>
           <View style={styles.typeBadge}>
             <Text style={styles.typeBadgeText}>
-              {item.type === "image" ? "GÖRSEL" : "PDF"}
+              {item.type === "image"
+                ? "GÖRSEL"
+                : item.type === "spreadsheet"
+                  ? "EXCEL"
+                  : "PDF"}
             </Text>
           </View>
           {item.size && (
@@ -447,13 +481,15 @@ export default function DocumentDetailScreen() {
           </Text>
         </View>
       </View>
-      <TouchableOpacity
-        style={styles.deleteButton}
-        onPress={() => handleDeleteDocument(item)}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <Ionicons name="trash-outline" size={20} color="#EF4444" />
-      </TouchableOpacity>
+      {canManageDocuments(role ?? undefined) && (
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDeleteDocument(item)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="trash-outline" size={20} color="#EF4444" />
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 
@@ -511,9 +547,11 @@ export default function DocumentDetailScreen() {
         </View>
       )}
 
-      <TouchableOpacity style={styles.fab} onPress={handleAddDocument}>
-        <Ionicons name="add" size={32} color="#fff" />
-      </TouchableOpacity>
+      {canManageDocuments(role ?? undefined) && (
+        <TouchableOpacity style={styles.fab} onPress={handleAddDocument}>
+          <Ionicons name="add" size={32} color="#fff" />
+        </TouchableOpacity>
+      )}
 
       <Modal
         visible={modalVisible}
@@ -521,7 +559,7 @@ export default function DocumentDetailScreen() {
         presentationStyle="fullScreen"
         onRequestClose={() => setModalVisible(false)}
       >
-        <SafeAreaView style={styles.previewContainer} edges={["top", "bottom"]}>
+        <SafeAreaView style={styles.previewContainer} edges={["bottom"]}>
           <View style={styles.previewHeader}>
             <TouchableOpacity
               onPress={() => setModalVisible(false)}
@@ -542,7 +580,11 @@ export default function DocumentDetailScreen() {
               {sharing ? (
                 <ActivityIndicator size="small" color={COLORS.primary} />
               ) : (
-                <Ionicons name="share-outline" size={22} color={COLORS.primary} />
+                <Ionicons
+                  name="share-outline"
+                  size={22}
+                  color={COLORS.primary}
+                />
               )}
             </TouchableOpacity>
           </View>
@@ -554,6 +596,18 @@ export default function DocumentDetailScreen() {
                 style={styles.imagePreview}
                 resizeMode="contain"
               />
+            </View>
+          ) : selectedDoc?.type === "spreadsheet" ? (
+            <View style={styles.previewEmpty}>
+              <MaterialCommunityIcons
+                name="microsoft-excel"
+                size={56}
+                color="#18864B"
+              />
+              <Text style={styles.previewEmptyText}>
+                Excel dosyasını açmak için sağ üstten paylaşın veya Dosyalar’a
+                kaydedin.
+              </Text>
             </View>
           ) : selectedDoc?.url ? (
             <WebView
@@ -793,7 +847,8 @@ const styles = StyleSheet.create({
   deleteButton: { padding: 8, marginLeft: 8 },
   previewContainer: { flex: 1, backgroundColor: "#F8FAFC" },
   previewHeader: {
-    height: 60,
+    height: 100,
+    paddingTop: 40,
     paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
@@ -828,7 +883,12 @@ const styles = StyleSheet.create({
   imagePreviewWrap: { flex: 1, padding: 16, justifyContent: "center" },
   imagePreview: { width: "100%", height: "100%" },
   pdfPreview: { flex: 1, backgroundColor: "#fff" },
-  previewEmpty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  previewEmpty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
   previewEmptyText: { color: "#64748B", fontSize: 15 },
   fab: {
     position: "absolute",

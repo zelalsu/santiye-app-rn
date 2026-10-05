@@ -1,5 +1,5 @@
 import { COLORS } from "@/constants/theme";
-import { auth, db } from "@/firebaseConfig";
+import { db } from "@/firebaseConfig";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { documentDirectory, getInfoAsync } from "expo-file-system/legacy";
 import * as Print from "expo-print";
@@ -30,14 +30,15 @@ export default function PdfHistoryModal({
   visible,
   onClose,
   projectId,
+  ownerId,
   generateHtml, // pdf html'ini dışarıdan al
 }: {
   visible: boolean;
   onClose: () => void;
   projectId: string;
+  ownerId: string;
   generateHtml: () => string;
 }) {
-  const user = auth.currentUser;
   const [records, setRecords] = useState<PdfRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [sharingId, setSharingId] = useState<string | null>(null);
@@ -46,13 +47,15 @@ export default function PdfHistoryModal({
 
   useEffect(() => {
     if (visible) loadHistory();
+    // Modal her açıldığında güncel geçmiş alınır.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const loadHistory = async () => {
     try {
       setLoading(true);
       const q = query(
-        collection(db, "users", user!.uid, "projects", projectId, "pdfHistory"),
+        collection(db, "users", ownerId, "projects", projectId, "pdfHistory"),
         orderBy("createdAt", "desc"),
       );
       const snap = await getDocs(q);

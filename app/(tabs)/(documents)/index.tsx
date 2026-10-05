@@ -5,7 +5,8 @@ import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { PhaseInfo } from "@/types/phases";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { canManageDocuments, canSeeCosts, canUseDocuments, loadActiveProject } from "@/config/projectAccess";
+import { ProjectRole } from "@/types/projects";
 import { router } from "expo-router";
 import {
   collection,
@@ -65,6 +66,8 @@ const LEGACY_SECTION_IDS = ["1", "2", "3", "4", "5", "6"];
 
 export default function DocumentsScreen() {
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectOwnerId, setProjectOwnerId] = useState<string | null>(null);
+  const [role, setRole] = useState<ProjectRole>("owner");
   const [loading, setLoading] = useState(true);
   const [phases, setPhases] = useState<DocumentSection[]>([]);
   const [editorVisible, setEditorVisible] = useState(false);
@@ -79,9 +82,19 @@ export default function DocumentsScreen() {
   useEffect(() => {
     const load = async () => {
       try {
-        const id = await AsyncStorage.getItem("activeProjectId");
-        setProjectId(id);
-        if (!id) setLoading(false);
+        const active = await loadActiveProject();
+        if (!canUseDocuments(active.role)) {
+          setLoading(false);
+          router.replace({
+            pathname: "/(tabs)/daily",
+            params: { projectId: active.id, ownerId: active.ownerId, role: active.role },
+          } as never);
+          return;
+        }
+        setProjectId(active.id || null);
+        setProjectOwnerId(active.ownerId || auth.currentUser?.uid || null);
+        setRole(active.role);
+        if (!active.id) setLoading(false);
       } catch {
         setLoading(false);
       }
@@ -90,8 +103,10 @@ export default function DocumentsScreen() {
   }, []);
 
   useEffect(() => {
-    if (projectId && user) loadSections();
-  }, [projectId]);
+    if (projectId && projectOwnerId && user) loadSections();
+    // loadSections aktif proje değiştiğinde yeniden çalıştırılır.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, projectOwnerId]);
 
   const loadSections = async () => {
     try {
@@ -99,7 +114,7 @@ export default function DocumentsScreen() {
       const sectionsRef = collection(
         db,
         "users",
-        user!.uid,
+        projectOwnerId!,
         "projects",
         projectId!,
         "documentSections",
@@ -119,17 +134,19 @@ export default function DocumentsScreen() {
 
       if (sections.length === 0) {
         sections = DEFAULT_SECTIONS;
-        await Promise.all(
-          sections.map((section) =>
-            setDoc(doc(sectionsRef, section.id), {
-              title: section.title,
-              iconName: section.iconName,
-              iconPack: section.iconPack,
-              order: section.order,
-              createdAt: serverTimestamp(),
-            }),
-          ),
-        );
+        if (canManageDocuments(role)) {
+          await Promise.all(
+            sections.map((section) =>
+              setDoc(doc(sectionsRef, section.id), {
+                title: section.title,
+                iconName: section.iconName,
+                iconPack: section.iconPack,
+                order: section.order,
+                createdAt: serverTimestamp(),
+              }),
+            ),
+          );
+        }
       } else if (legacySections.length > 0) {
         const legacyDocuments = await Promise.all(
           legacySections.map((section) =>
@@ -137,7 +154,7 @@ export default function DocumentsScreen() {
               collection(
                 db,
                 "users",
-                user!.uid,
+                projectOwnerId!,
                 "projects",
                 projectId!,
                 "phases",
@@ -176,7 +193,7 @@ export default function DocumentsScreen() {
             collection(
               db,
               "users",
-              user!.uid,
+              projectOwnerId!,
               "projects",
               projectId!,
               "phases",
@@ -220,7 +237,7 @@ export default function DocumentsScreen() {
       const sectionsRef = collection(
         db,
         "users",
-        user.uid,
+        projectOwnerId!,
         "projects",
         projectId,
         "documentSections",
@@ -291,7 +308,7 @@ export default function DocumentsScreen() {
                 collection(
                   db,
                   "users",
-                  user.uid,
+                  projectOwnerId!,
                   "projects",
                   projectId,
                   "phases",
@@ -312,7 +329,7 @@ export default function DocumentsScreen() {
                 doc(
                   db,
                   "users",
-                  user.uid,
+                  projectOwnerId!,
                   "projects",
                   projectId,
                   "documentSections",
@@ -344,8 +361,10 @@ export default function DocumentsScreen() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <Header
         title="Proje belgeleri"
-        rightIcon="plus"
-        onRightIconPress={() => openEditor()}
+        leftMenuIcon
+        accountIcon
+        rightIcon={canManageDocuments(role) ? "plus" : undefined}
+        onRightIconPress={canManageDocuments(role) ? () => openEditor() : undefined}
       />
 
       {!projectId ? (
@@ -362,8 +381,39 @@ export default function DocumentsScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.listIntro}>
-            Kategorileri düzenleyebilir, yeni belge alanları ekleyebilirsiniz.
+            Raporlarınızı oluşturabilir, proje belgelerini kategorilere göre düzenleyebilirsiniz.
           </Text>
+          {canSeeCosts(role) && (
+            <>
+              <Text style={styles.sectionLabel}>RAPORLAR</Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Proje maliyet raporunu aç"
+                style={styles.reportCard}
+                activeOpacity={0.75}
+                onPress={() =>
+                  router.push({
+                    pathname: "/projectSummary",
+                    params: {
+                      projectId,
+                      ownerId: projectOwnerId,
+                      reportMode: "true",
+                    },
+                  })
+                }
+              >
+                <View style={styles.reportIconWrap}>
+                  <Ionicons name="document-text-outline" size={24} color="#D33B32" />
+                </View>
+                <View style={styles.cardBody}>
+                  <Text style={styles.reportTitle}>Proje Maliyet Raporu</Text>
+                  <Text style={styles.reportDescription}>Güncel maliyetleri PDF olarak oluşturun ve paylaşın</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </>
+          )}
+          <Text style={styles.sectionLabel}>BELGE KATEGORİLERİ</Text>
           {phases.map((phase) => (
             <TouchableOpacity
               key={phase.id}
@@ -378,6 +428,7 @@ export default function DocumentsScreen() {
                     phaseId: phase.id,
                     phaseTitle: phase.title,
                     projectId: projectId,
+                    ownerId: projectOwnerId,
                   },
                 })
               }
@@ -394,7 +445,7 @@ export default function DocumentsScreen() {
                 <Text style={styles.cardIndex}>BELGE KATEGORİSİ</Text>
                 <Text style={styles.cardTitle}>{phase.title}</Text>
               </View>
-              <View style={styles.cardActions}>
+              {canManageDocuments(role) && <View style={styles.cardActions}>
                 <TouchableOpacity
                   style={styles.cardAction}
                   onPress={(event) => {
@@ -415,7 +466,7 @@ export default function DocumentsScreen() {
                 >
                   <Ionicons name="trash-outline" size={18} color="#EF4444" />
                 </TouchableOpacity>
-              </View>
+              </View>}
             </TouchableOpacity>
           ))}
           <View style={{ height: 32 }} />
@@ -499,6 +550,36 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginBottom: 12,
   },
+  sectionLabel: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.9,
+    marginTop: 4,
+    marginBottom: 8,
+    marginLeft: 3,
+  },
+  reportCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    gap: 13,
+  },
+  reportIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FDECEB",
+  },
+  reportTitle: { color: COLORS.text, fontSize: 15, fontWeight: "800" },
+  reportDescription: { color: COLORS.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 3 },
   card: {
     flexDirection: "row",
     alignItems: "center",
