@@ -156,8 +156,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(15,23,42,0.5)",
     justifyContent: "flex-end",
+    alignItems: "center",
   },
   sheet: {
+    width: "100%",
+    maxWidth: 720,
     backgroundColor: "#fff",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,

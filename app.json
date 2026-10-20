@@ -9,7 +9,8 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
+      "requireFullScreen": true,
       "bundleIdentifier": "com.zelalsu.SantiyeApp",
       "config": {
         "usesNonExemptEncryption": false

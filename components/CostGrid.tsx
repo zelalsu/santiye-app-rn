@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
   gridContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    gap: 16,
     paddingHorizontal: 16,
   },
 

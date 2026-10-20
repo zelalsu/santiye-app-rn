@@ -2178,7 +2178,14 @@ function Empty({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   keyboardView: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 120, gap: 14 },
+  scrollContent: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 120,
+    gap: 14,
+  },
   dateCard: {
     backgroundColor: COLORS.primary,
     borderRadius: 20,
@@ -2422,6 +2429,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15, 23, 42, 0.42)",
   },
   unitModalSheet: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
     backgroundColor: COLORS.white,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,

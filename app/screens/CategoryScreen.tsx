@@ -679,6 +679,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
 
   scrollContent: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
     paddingTop: 16,
     paddingHorizontal: 16,
   },
@@ -766,6 +769,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15, 23, 42, 0.42)",
   },
   unitModalSheet: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
     backgroundColor: COLORS.white,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,

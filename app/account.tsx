@@ -311,7 +311,14 @@ export default function AccountScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  content: { flexGrow: 1, padding: 20, gap: 12 },
+  content: {
+    flexGrow: 1,
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    padding: 20,
+    gap: 12,
+  },
   profileCard: {
     flexDirection: "row",
     alignItems: "center",

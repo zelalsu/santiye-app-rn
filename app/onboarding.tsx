@@ -114,7 +114,15 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  content: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 16, gap: 22 },
+  content: {
+    flexGrow: 1,
+    width: "100%",
+    maxWidth: 680,
+    alignSelf: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    gap: 22,
+  },
   topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logo: { width: 40, height: 40, borderRadius: 12 },

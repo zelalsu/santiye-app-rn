@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: { fontSize: 18, fontWeight: "700", color: "#1A1A1A" },
-  list: { padding: 20, gap: 12 },
+  list: { width: "100%", maxWidth: 960, alignSelf: "center", padding: 20, gap: 12 },
   card: {
     backgroundColor: "#fff",
     borderRadius: 18,

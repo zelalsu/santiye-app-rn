@@ -638,6 +638,9 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
     backgroundColor: COLORS.white,
     paddingTop: 16,
     paddingHorizontal: 24,
@@ -724,6 +727,9 @@ const styles = StyleSheet.create({
 
   // Liste Başlığı
   listHeader: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 24,
@@ -733,7 +739,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   joinButton: {
-    marginHorizontal: 24,
+    width: "90%",
+    maxWidth: 912,
+    alignSelf: "center",
     marginTop: 14,
     paddingVertical: 11,
     borderRadius: 12,
@@ -770,6 +778,9 @@ const styles = StyleSheet.create({
 
   // List
   list: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
     paddingHorizontal: 16,
     gap: 12,
     paddingBottom: 120,
@@ -848,9 +859,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(15,23,42,0.45)",
     justifyContent: "flex-end",
+    alignItems: "center",
   },
 
   modalSheet: {
+    width: "100%",
+    maxWidth: 720,
     backgroundColor: COLORS.white,
 
     borderTopLeftRadius: 30,

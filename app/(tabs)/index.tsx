@@ -9,13 +9,15 @@ import { ProjectRole } from "@/types/projects";
 import { useLocalSearchParams } from "expo-router";
 import { collection, doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
-import { Dimensions, ScrollView } from "react-native";
+import { ScrollView, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const { width } = Dimensions.get("window");
-const COLUMN_WIDTH = (width - 48) / 2;
-
 export default function HomeScreen() {
+  const { width } = useWindowDimensions();
+  const contentWidth = Math.min(width, 960);
+  const columnCount = contentWidth >= 720 ? 3 : 2;
+  const columnWidth =
+    (contentWidth - 32 - (columnCount - 1) * 16) / columnCount;
   const { projectId, ownerId } = useLocalSearchParams<{ projectId: string; ownerId?: string }>();
   const user = auth.currentUser;
   const [search, setSearch] = useState("");
@@ -133,13 +135,18 @@ export default function HomeScreen() {
       />
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 50 }}
+        contentContainerStyle={{
+          width: "100%",
+          maxWidth: 960,
+          alignSelf: "center",
+          paddingBottom: 110,
+        }}
       >
         {showCosts && <SummaryCard projectId={resolvedProjectId} ownerId={resolvedOwnerId} total={grandTotal} />}
         <SearchBar value={search} onChange={setSearch} />
         <CostGrid
           items={filteredItems}
-          columnWidth={COLUMN_WIDTH}
+          columnWidth={columnWidth}
           categoryTotals={categoryTotals}
           projectId={resolvedProjectId}
           ownerId={resolvedOwnerId}

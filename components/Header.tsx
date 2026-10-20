@@ -54,9 +54,9 @@ export default function Header({
         )}
 
         <View style={styles.headerMainText}>
-          <Text style={styles.headerMainSub}>Şantiye Pusula</Text>
-          <Text style={styles.headerMainTitle}>{title}</Text>
-          {subtitle && <Text style={styles.headerMainMeta}>{subtitle}</Text>}
+          <Text numberOfLines={1} style={styles.headerMainSub}>Şantiye Pusula</Text>
+          <Text numberOfLines={1} style={styles.headerMainTitle}>{title}</Text>
+          {subtitle && <Text numberOfLines={1} style={styles.headerMainMeta}>{subtitle}</Text>}
         </View>
         {(rightIcon || accountIcon) && (
           <View style={styles.headerActions}>
@@ -84,11 +84,9 @@ export default function Header({
 
 const styles = StyleSheet.create({
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-
-    paddingVertical: 15,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
   },
   headerTitle: {
     fontSize: 18,
@@ -111,13 +109,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
+    width: "100%",
+    maxWidth: 1000,
+    alignSelf: "center",
     gap: 12,
   },
   headerMainText: {
     flex: 1,
+    minWidth: 0,
   },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
 

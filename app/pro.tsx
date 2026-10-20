@@ -378,7 +378,13 @@ export default function ProScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  content: { padding: 22, paddingBottom: 36 },
+  content: {
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    padding: 22,
+    paddingBottom: 36,
+  },
   hero: { alignItems: "center", paddingTop: 12, marginBottom: 24 },
   proBadge: {
     flexDirection: "row",

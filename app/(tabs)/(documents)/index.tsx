@@ -551,7 +551,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: "500",
   },
-  list: { paddingHorizontal: 16, paddingTop: 4 },
+  list: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 110,
+  },
   listIntro: {
     color: "#64748B",
     fontSize: 13,
@@ -665,6 +672,7 @@ const styles = StyleSheet.create({
   },
   editorModal: {
     width: "100%",
+    maxWidth: 680,
     borderRadius: 20,
     backgroundColor: "#fff",
     padding: 20,

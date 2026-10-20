@@ -103,7 +103,7 @@ export default function ProjectTeamScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  inviteCard: { margin: 16, padding: 18, borderRadius: 18, backgroundColor: COLORS.white, borderWidth: 1, borderColor: COLORS.border },
+  inviteCard: { width: "100%", maxWidth: 928, alignSelf: "center", marginVertical: 16, padding: 18, borderRadius: 18, backgroundColor: COLORS.white, borderWidth: 1, borderColor: COLORS.border },
   title: { fontSize: 17, fontWeight: "800", color: COLORS.text },
   caption: { fontSize: 13, lineHeight: 19, color: COLORS.textSecondary, marginTop: 6 },
   roles: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 14 },
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   shareButton: { backgroundColor: COLORS.primary, borderRadius: 12, padding: 13, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7 },
   shareText: { color: "#fff", fontWeight: "800" },
   section: { marginHorizontal: 20, marginBottom: 8, fontSize: 11, letterSpacing: 1, color: COLORS.textSecondary, fontWeight: "800" },
-  list: { paddingHorizontal: 16, gap: 10, paddingBottom: 30 },
+  list: { width: "100%", maxWidth: 960, alignSelf: "center", paddingHorizontal: 16, gap: 10, paddingBottom: 30 },
   memberCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: COLORS.white, borderRadius: 15, padding: 14, borderWidth: 1, borderColor: COLORS.borderLight },
   avatar: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.primaryLight, alignItems: "center", justifyContent: "center" },
   memberName: { fontSize: 14, fontWeight: "800", color: COLORS.text },

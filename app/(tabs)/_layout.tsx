@@ -5,11 +5,13 @@ import { Tabs, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { canSeeCosts, canUseDaily, canUseDocuments, canUseMeasurements, loadActiveProject } from "@/config/projectAccess";
 import { ProjectRole } from "@/types/projects";
-import { StyleSheet, useColorScheme, View } from "react-native";
+import { StyleSheet, useColorScheme, useWindowDimensions, View } from "react-native";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
+  const { width } = useWindowDimensions();
+  const tabBarWidth = Math.min(width - 32, 760);
   const params = useLocalSearchParams<{ role?: ProjectRole }>();
   const [role, setRole] = useState<ProjectRole | null>(params.role ?? null);
 
@@ -28,7 +30,13 @@ export default function TabLayout() {
         headerShown: false,
         tabBarActiveTintColor: isDark ? "#69A7F5" : COLORS.primary,
         tabBarInactiveTintColor: isDark ? "#AEB3BC" : "#6B7280",
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [
+          styles.tabBar,
+          {
+            width: tabBarWidth,
+            left: (width - tabBarWidth) / 2,
+          },
+        ],
 
         tabBarLabelStyle: {
           fontSize: 12,
@@ -101,8 +109,6 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   tabBar: {
     bottom: 20,
-    left: 20,
-    right: 20,
     borderRadius: 25,
     height: 60,
     paddingBottom: 10,

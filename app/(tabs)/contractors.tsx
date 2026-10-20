@@ -1089,6 +1089,9 @@ const styles = StyleSheet.create({
 
   proScreen: {
     flexGrow: 1,
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
     paddingHorizontal: 20,
     paddingTop: 28,
     paddingBottom: 120,
@@ -1222,6 +1225,9 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
     paddingHorizontal: 16,
     paddingBottom: 110,
   },

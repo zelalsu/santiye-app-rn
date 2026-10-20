@@ -694,7 +694,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#F8FAFC",
   },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 8 },
+  scrollContent: { width: "100%", maxWidth: 960, alignSelf: "center", paddingHorizontal: 16, paddingTop: 8 },
   section: { marginBottom: 24 },
   sectionTitle: {
     fontSize: 15,
@@ -942,6 +942,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     width: "90%",
+    maxWidth: 960,
     height: "80%",
     backgroundColor: "#fff",
     borderRadius: 16,

@@ -43,7 +43,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View>
+      <View style={styles.main}>
         <View style={styles.header}>
           <View style={styles.logoContainer}>
             <View style={styles.iconBox}>
@@ -148,6 +148,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  main: {
+    flex: 1,
+    width: "100%",
+    maxWidth: 960,
+  },
 
   header: {
     flexDirection: "row",
@@ -198,6 +203,7 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
+    width: "100%",
     paddingHorizontal: 20,
     paddingBottom: 120,
   },

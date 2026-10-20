@@ -339,11 +339,7 @@ export default function ProjectSummaryScreen() {
         presentationStyle="fullScreen"
         onRequestClose={() => setPdfPreviewVisible(false)}
       >
-        <View style={styles.previewRoot}>
-          {/* Status bar için spacing */}
-          <View style={styles.statusBarSpacer} />
-
-          {/* Üst bar - SafeArea içinde değil, manuel padding */}
+        <SafeAreaView style={styles.previewRoot}>
           <View style={styles.previewHeader}>
             <TouchableOpacity
               onPress={() => setPdfPreviewVisible(false)}
@@ -392,7 +388,7 @@ export default function ProjectSummaryScreen() {
               <Text style={styles.downloadBtnText}>İndir / Paylaş</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* ─── Ana header ─── */}
@@ -539,15 +535,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#F5F7FB",
   },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 30 },
+  scrollContent: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 30,
+  },
 
   // PDF Preview Modal - YENİ
   previewRoot: {
     flex: 1,
-    backgroundColor: "#fff",
-  },
-  statusBarSpacer: {
-    height: 44, // Status bar yüksekliği (iPhone için 44, Android için 24-32)
     backgroundColor: "#fff",
   },
   previewHeader: {
