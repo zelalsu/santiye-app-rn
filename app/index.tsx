@@ -52,7 +52,7 @@ export default function App() {
                 style={styles.logo}
               />
             </View>
-            <Text style={styles.headerTitle}>Şantiyen Cebinde</Text>
+            <Text style={styles.headerTitle}>Şantiye Pusula</Text>
           </View>
         </View>
 

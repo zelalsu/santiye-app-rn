@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -30,7 +31,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useIAP, type Purchase } from "react-native-iap";
+import { getStorefront, useIAP, type Purchase } from "react-native-iap";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 interface Contractor {
@@ -45,7 +46,23 @@ interface Contractor {
 }
 
 const parseMoney = (value: string) => parseFloat(value.replace(",", ".")) || 0;
-const CONTRACTOR_PRO_PRODUCT_ID = "com.santiyencebinde.pro.monthly";
+const CONTRACTOR_PRO_PRODUCT_IDS = {
+  ios: "com.santiyencebinde.pro.monthly",
+  android: "com.santiyencebinde.pro.monthly",
+} as const;
+const CONTRACTOR_PRO_PRODUCT_ID =
+  Platform.OS === "android"
+    ? CONTRACTOR_PRO_PRODUCT_IDS.android
+    : CONTRACTOR_PRO_PRODUCT_IDS.ios;
+const CONTRACTOR_PREVIEW: Contractor = {
+  id: "contractor-preview",
+  name: "Örnek Taşeron",
+  workType: "Kalıp ve demir işleri",
+  contractAmount: 240000,
+  paidAmount: 100000,
+  progress: 55,
+  note: "Bu kart, Pro ekranında tutabileceğiniz bilgilerin bir örneğidir.",
+};
 
 interface ContractorProSubscription {
   active?: boolean;
@@ -76,21 +93,37 @@ export default function ContractorsScreen() {
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [proLoading, setProLoading] = useState(true);
-  const [isContractorPro, setIsContractorPro] = useState(false);
+  const [projectPro, setProjectPro] = useState(false);
+  const [accountPro, setAccountPro] = useState(false);
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogRequest, setCatalogRequest] = useState(0);
 
   const verifyPurchase = useCallback(
     async (purchase: Purchase) => {
-      if (!projectId || !purchase.id) return false;
+      const purchaseToken = purchase.purchaseToken ?? undefined;
+      if (
+        !projectId ||
+        (Platform.OS === "ios" && !purchase.id) ||
+        (Platform.OS === "android" && !purchaseToken)
+      ) {
+        return false;
+      }
 
       const verifyContractorPro = httpsCallable<
-        { transactionId: string; projectId: string },
+        {
+          platform: "ios" | "android";
+          transactionId?: string;
+          purchaseToken?: string;
+          projectId: string;
+        },
         { active: boolean }
       >(functions, "verifyContractorPro");
       const result = await verifyContractorPro({
-        transactionId: purchase.id,
+        platform: Platform.OS === "android" ? "android" : "ios",
+        transactionId: Platform.OS === "ios" ? purchase.id : undefined,
+        purchaseToken:
+          Platform.OS === "android" ? purchaseToken : undefined,
         projectId,
       });
       return result.data.active;
@@ -116,7 +149,7 @@ export default function ContractorsScreen() {
           if (!active) {
             Alert.alert(
               "Abonelik etkinleşmedi",
-              "App Store aboneliği etkin görünmüyor. Satın alımları geri yükleyip tekrar deneyin.",
+              "Mağaza aboneliği etkin görünmüyor. Satın alımları geri yükleyip tekrar deneyin.",
             );
             return;
           }
@@ -179,7 +212,7 @@ export default function ContractorsScreen() {
         const subscription = snapshot.data() as
           | ContractorProSubscription
           | undefined;
-        setIsContractorPro(subscription?.active === true);
+        setProjectPro(subscription?.active === true);
         setProLoading(false);
       },
       (error) => {
@@ -188,6 +221,35 @@ export default function ContractorsScreen() {
       },
     );
   }, [projectId, projectOwnerId, role]);
+
+  useEffect(() => {
+    if (!projectOwnerId || !canSeeCosts(role)) return;
+    return onSnapshot(
+      doc(db, "users", projectOwnerId, "entitlements", "pro"),
+      (snapshot) => setAccountPro(snapshot.data()?.active === true),
+      (error) => {
+        if (error.code !== "permission-denied") {
+          console.error("Hesap Pro durumu alınamadı:", error);
+        }
+        setAccountPro(false);
+      },
+    );
+  }, [projectOwnerId, role]);
+
+  const isContractorPro = accountPro || projectPro;
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        // Sandbox hesabı veya App Store ülkesi Ayarlar'dan değiştirildiğinde
+        // StoreKit önceki mağazanın ürün fiyatını bellekte tutabilir. Uygulama
+        // yeniden öne geldiğinde kataloğu güncel storefront için tekrar iste.
+        setCatalogRequest((value) => value + 1);
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     console.log("[IAP] Store bağlantısı:", {
@@ -203,6 +265,9 @@ export default function ContractorsScreen() {
     void (async () => {
       setCatalogLoading(true);
       try {
+        const storefront = await getStorefront().catch(() => "unknown");
+        console.log("[IAP] Etkin mağaza bölgesi:", storefront);
+
         // App Store Connect değişiklikleri sandbox kataloğuna gecikmeli
         // yansıyabildiği için boş yanıt durumunda birkaç kez yeniden sorgula.
         for (let attempt = 1; attempt <= 3 && !cancelled; attempt += 1) {
@@ -217,7 +282,7 @@ export default function ContractorsScreen() {
           }
         }
       } catch (error) {
-        console.error("[IAP] App Store ürünleri alınamadı:", error);
+        console.error("[IAP] Mağaza ürünleri alınamadı:", error);
       } finally {
         if (!cancelled) setCatalogLoading(false);
       }
@@ -242,6 +307,7 @@ export default function ContractorsScreen() {
       subscriptions.map((product) => ({
         id: product.id,
         displayPrice: product.displayPrice,
+        currency: product.currency,
         type: product.type,
       })),
     );
@@ -324,6 +390,13 @@ export default function ContractorsScreen() {
       remaining: Math.max(contract - paid, 0),
     };
   }, [contractors]);
+
+  const visibleContractors = isContractorPro
+    ? contractors
+    : [CONTRACTOR_PREVIEW];
+  const visibleTotals = isContractorPro
+    ? totals
+    : { count: 1, contract: 240000, paid: 100000, remaining: 140000 };
 
   const resetForm = () => {
     setName("");
@@ -427,28 +500,51 @@ export default function ContractorsScreen() {
   const subscription = subscriptions.find(
     (item) => item.id === CONTRACTOR_PRO_PRODUCT_ID,
   );
+  const androidOfferToken = subscription?.subscriptionOffers?.find(
+    (offer) => Boolean(offer.offerTokenAndroid),
+  )?.offerTokenAndroid;
   const isProjectOwner = projectOwnerId === userId;
   const displayPrice = subscription?.displayPrice;
-  const isProductReady = Boolean(displayPrice);
+  const isProductReady = Boolean(subscription);
   const startPurchase = async () => {
     if (!storeConnected) {
       Alert.alert(
-        "App Store hazır değil",
-        "App Store bağlantısı kurulunca tekrar deneyin.",
+        "Mağaza hazır değil",
+        "Uygulama mağazası bağlantısı kurulunca tekrar deneyin.",
       );
       return;
     }
     if (!isProductReady) {
       Alert.alert(
         "Abonelik henüz hazır değil",
-        "App Store fiyat bilgisini henüz göndermedi. Lütfen kısa süre sonra tekrar deneyin.",
+        "Uygulama mağazası fiyat bilgisini henüz göndermedi. Lütfen kısa süre sonra tekrar deneyin.",
+      );
+      return;
+    }
+    if (Platform.OS === "android" && !androidOfferToken) {
+      Alert.alert(
+        "Abonelik planı hazır değil",
+        "Google Play aylık abonelik planını henüz göndermedi. Lütfen kısa süre sonra tekrar deneyin.",
       );
       return;
     }
     setPurchaseLoading(true);
     try {
       await requestPurchase({
-        request: { apple: { sku: CONTRACTOR_PRO_PRODUCT_ID } },
+        request:
+          Platform.OS === "android"
+            ? {
+                google: {
+                  skus: [CONTRACTOR_PRO_PRODUCT_ID],
+                  subscriptionOffers: [
+                    {
+                      sku: CONTRACTOR_PRO_PRODUCT_ID,
+                      offerToken: androidOfferToken!,
+                    },
+                  ],
+                },
+              }
+            : { apple: { sku: CONTRACTOR_PRO_PRODUCT_ID } },
         type: "subs",
       });
     } catch (error) {
@@ -469,7 +565,7 @@ export default function ContractorsScreen() {
       console.error("Satın alma geri yüklenemedi:", error);
       Alert.alert(
         "Geri yüklenemedi",
-        "App Store hesabınızı ve bağlantınızı kontrol edip tekrar deneyin.",
+        "Mağaza hesabınızı ve bağlantınızı kontrol edip tekrar deneyin.",
       );
     } finally {
       setPurchaseLoading(false);
@@ -487,11 +583,14 @@ export default function ContractorsScreen() {
     );
   }
 
-  if (!isContractorPro) {
+  if (!isContractorPro && !isProjectOwner) {
     return (
       <SafeAreaView style={styles.container}>
         <Header title="Taşeron Takibi" leftMenuIcon accountIcon />
-        <View style={styles.proScreen}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.proScreen}
+        >
           <View style={styles.proIcon}>
             <MaterialCommunityIcons
               name="shield-crown-outline"
@@ -504,19 +603,48 @@ export default function ContractorsScreen() {
             Sözleşmeleri, hakedişleri ve taşeron ödemelerini tek şantiyede takip
             edin.
           </Text>
+          <Text style={styles.proBenefitsTitle}>Pro ile neler yapabilirsiniz?</Text>
           <View style={styles.proFeatures}>
             {[
-              "Sözleşme ve anlaşma bedeli",
-              "Ödenen / kalan hakediş takibi",
-              "Toplam maliyete otomatik yansıma",
+              {
+                icon: "account-hard-hat-outline" as const,
+                title: "Tüm taşeronları tek yerde yönetin",
+                description:
+                  "Firma, iş türü, anlaşma bedeli ve çalışma notlarını şantiye bazında kaydedin.",
+              },
+              {
+                icon: "cash-check" as const,
+                title: "Hakediş ve ödemeleri takip edin",
+                description:
+                  "Ödenen tutarı, kalan borcu ve iş ilerlemesini anlık olarak görün.",
+              },
+              {
+                icon: "calculator-variant-outline" as const,
+                title: "Maliyeti otomatik hesaplayın",
+                description:
+                  "Taşeron anlaşma bedellerini toplam şantiye maliyetine otomatik yansıtın.",
+              },
+              {
+                icon: "file-document-check-outline" as const,
+                title: "Kayıtları düzenli ve erişilebilir tutun",
+                description:
+                  "Ödeme geçmişini ve sözleşme bilgilerini ihtiyaç duyduğunuz anda kontrol edin.",
+              },
             ].map((feature) => (
-              <View key={feature} style={styles.proFeature}>
-                <MaterialCommunityIcons
-                  name="check-circle"
-                  size={18}
-                  color="#16A34A"
-                />
-                <Text style={styles.proFeatureText}>{feature}</Text>
+              <View key={feature.title} style={styles.proFeature}>
+                <View style={styles.proFeatureIcon}>
+                  <MaterialCommunityIcons
+                    name={feature.icon}
+                    size={22}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <View style={styles.proFeatureContent}>
+                  <Text style={styles.proFeatureTitle}>{feature.title}</Text>
+                  <Text style={styles.proFeatureDescription}>
+                    {feature.description}
+                  </Text>
+                </View>
               </View>
             ))}
           </View>
@@ -575,7 +703,7 @@ export default function ContractorsScreen() {
               Bu özelliği yalnızca şantiye yöneticisi etkinleştirebilir.
             </Text>
           )}
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -593,23 +721,70 @@ export default function ContractorsScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
+          {!isContractorPro ? (
+            <View style={styles.previewBanner}>
+              <View style={styles.previewBannerTop}>
+                <View style={styles.previewBannerIcon}>
+                  <MaterialCommunityIcons
+                    name="shield-crown-outline"
+                    size={23}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <View style={styles.previewBannerCopy}>
+                  <Text style={styles.previewBannerTitle}>
+                    Taşeron Takibi Pro
+                  </Text>
+                  <Text style={styles.previewBannerText}>
+                    Aşağıdaki ekranı inceleyin. Kayıt eklemek ve yönetmek için
+                    Pro’yu etkinleştirin.
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.previewBannerAction}>
+                <Text style={styles.previewBannerPrice}>
+                  {isProductReady
+                    ? `${displayPrice} / ay`
+                    : "Fiyat yükleniyor…"}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.previewUpgradeButton,
+                    (!isProductReady || purchaseLoading) &&
+                      styles.proButtonDisabled,
+                  ]}
+                  onPress={startPurchase}
+                  disabled={!isProductReady || purchaseLoading}
+                >
+                  {purchaseLoading ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <Text style={styles.previewUpgradeButtonText}>
+                      Pro’yu etkinleştir
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.summaryStrip}>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>Taşeron</Text>
-              <Text style={styles.summaryValue}>{totals.count}</Text>
+              <Text style={styles.summaryValue}>{visibleTotals.count}</Text>
             </View>
             <View style={styles.summaryDivider} />
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>Ödenen</Text>
               <Text style={styles.summaryValue}>
-                ₺{totals.paid.toLocaleString("tr-TR")}
+                ₺{visibleTotals.paid.toLocaleString("tr-TR")}
               </Text>
             </View>
             <View style={styles.summaryDivider} />
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>Kalan</Text>
               <Text style={styles.summaryValue}>
-                ₺{totals.remaining.toLocaleString("tr-TR")}
+                ₺{visibleTotals.remaining.toLocaleString("tr-TR")}
               </Text>
             </View>
           </View>
@@ -639,6 +814,7 @@ export default function ContractorsScreen() {
                   placeholderTextColor={COLORS.placeholder}
                   value={name}
                   onChangeText={setName}
+                  editable={isContractorPro}
                 />
               </View>
               <View style={[styles.fieldGroup, styles.half]}>
@@ -649,6 +825,7 @@ export default function ContractorsScreen() {
                   placeholderTextColor={COLORS.placeholder}
                   value={workType}
                   onChangeText={setWorkType}
+                  editable={isContractorPro}
                 />
               </View>
             </View>
@@ -665,6 +842,7 @@ export default function ContractorsScreen() {
                   onChangeText={(text) =>
                     setContractAmount(text.replace(/[^0-9.,]/g, ""))
                   }
+                  editable={isContractorPro}
                 />
               </View>
               <View style={[styles.fieldGroup, styles.half]}>
@@ -678,6 +856,7 @@ export default function ContractorsScreen() {
                   onChangeText={(text) =>
                     setPaidAmount(text.replace(/[^0-9.,]/g, ""))
                   }
+                  editable={isContractorPro}
                 />
               </View>
             </View>
@@ -690,6 +869,7 @@ export default function ContractorsScreen() {
                   style={styles.dateInput}
                   activeOpacity={0.8}
                   onPress={() => setShowDatePicker(true)}
+                  disabled={!isContractorPro}
                 >
                   <View style={styles.dateLeft}>
                     <MaterialCommunityIcons
@@ -731,27 +911,35 @@ export default function ContractorsScreen() {
                   placeholderTextColor={COLORS.placeholder}
                   value={note}
                   onChangeText={setNote}
+                  editable={isContractorPro}
                 />
               </View>
             </View>
 
             <TouchableOpacity
-              style={[styles.addBtn, !isFormValid && styles.addBtnDisabled]}
-              onPress={handleAddContractor}
+              style={[
+                styles.addBtn,
+                isContractorPro && !isFormValid && styles.addBtnDisabled,
+              ]}
+              onPress={isContractorPro ? handleAddContractor : startPurchase}
               activeOpacity={0.85}
-              disabled={!isFormValid || saving}
+              disabled={isContractorPro ? !isFormValid || saving : purchaseLoading}
             >
-              {saving ? (
+              {saving || (!isContractorPro && purchaseLoading) ? (
                 <ActivityIndicator color={COLORS.white} />
               ) : (
                 <>
                   <MaterialCommunityIcons
-                    name="plus"
+                    name={isContractorPro ? "plus" : "lock-open-variant-outline"}
                     size={18}
                     color={COLORS.white}
                     style={styles.addBtnIcon}
                   />
-                  <Text style={styles.addBtnText}>Taşeronu Kaydet</Text>
+                  <Text style={styles.addBtnText}>
+                    {isContractorPro
+                      ? "Taşeronu Kaydet"
+                      : "Kayıt eklemek için Pro’yu etkinleştir"}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
@@ -760,15 +948,17 @@ export default function ContractorsScreen() {
           <View style={styles.listHeader}>
             <Text style={styles.listHeaderTitle}>Taşeronlar</Text>
             <Text style={styles.listHeaderCount}>
-              {contractors.length} kayıt
+              {isContractorPro
+                ? `${contractors.length} kayıt`
+                : "Örnek görünüm"}
             </Text>
           </View>
 
-          {loading ? (
+          {isContractorPro && loading ? (
             <View style={styles.center}>
               <ActivityIndicator color={COLORS.primary} />
             </View>
-          ) : contractors.length === 0 ? (
+          ) : visibleContractors.length === 0 ? (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons
                 name="account-group-outline"
@@ -781,7 +971,7 @@ export default function ContractorsScreen() {
               </Text>
             </View>
           ) : (
-            contractors.map((contractor) => {
+            visibleContractors.map((contractor) => {
               const remaining = Math.max(
                 (contractor.contractAmount || 0) - (contractor.paidAmount || 0),
                 0,
@@ -804,17 +994,23 @@ export default function ContractorsScreen() {
                       </Text>
                       <Text style={styles.workType}>{contractor.workType}</Text>
                     </View>
-                    <TouchableOpacity
-                      style={styles.deleteBtn}
-                      onPress={() => handleDeleteContractor(contractor)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <MaterialCommunityIcons
-                        name="trash-can-outline"
-                        size={18}
-                        color={COLORS.danger}
-                      />
-                    </TouchableOpacity>
+                    {isContractorPro ? (
+                      <TouchableOpacity
+                        style={styles.deleteBtn}
+                        onPress={() => handleDeleteContractor(contractor)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <MaterialCommunityIcons
+                          name="trash-can-outline"
+                          size={18}
+                          color={COLORS.danger}
+                        />
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.previewPill}>
+                        <Text style={styles.previewPillText}>ÖRNEK</Text>
+                      </View>
+                    )}
                   </View>
 
                   <View style={[styles.statusPill, status.style]}>
@@ -892,9 +1088,10 @@ const styles = StyleSheet.create({
   },
 
   proScreen: {
-    flex: 1,
-    paddingHorizontal: 28,
-    paddingTop: 56,
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 28,
+    paddingBottom: 120,
     alignItems: "center",
   },
 
@@ -923,29 +1120,56 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
+  proBenefitsTitle: {
+    alignSelf: "stretch",
+    marginTop: 28,
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: "800",
+  },
+
   proFeatures: {
     alignSelf: "stretch",
-    marginTop: 30,
-    marginBottom: 28,
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    borderRadius: 18,
-    padding: 18,
-    gap: 15,
+    marginTop: 14,
+    marginBottom: 24,
+    gap: 12,
   },
 
   proFeature: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    alignItems: "flex-start",
+    gap: 12,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: 16,
+    padding: 14,
   },
 
-  proFeatureText: {
+  proFeatureIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: "#EAF2FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  proFeatureContent: {
     flex: 1,
+    gap: 4,
+  },
+
+  proFeatureTitle: {
     fontSize: 14,
     color: COLORS.text,
-    fontWeight: "600",
+    fontWeight: "800",
+  },
+
+  proFeatureDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
 
   proButton: {
@@ -1000,6 +1224,92 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingBottom: 110,
+  },
+
+  previewBanner: {
+    marginTop: 12,
+    marginBottom: 14,
+    padding: 16,
+    gap: 14,
+    backgroundColor: "#EAF2FF",
+    borderWidth: 1,
+    borderColor: "#CFE0F7",
+    borderRadius: 18,
+  },
+
+  previewBannerTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+
+  previewBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.white,
+  },
+
+  previewBannerCopy: {
+    flex: 1,
+    gap: 4,
+  },
+
+  previewBannerTitle: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  previewBannerText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
+  previewBannerAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+
+  previewBannerPrice: {
+    flex: 1,
+    color: COLORS.primary,
+    fontSize: 17,
+    fontWeight: "800",
+  },
+
+  previewUpgradeButton: {
+    minHeight: 42,
+    paddingHorizontal: 15,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primary,
+  },
+
+  previewUpgradeButtonText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  previewPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: "#EAF2FF",
+  },
+
+  previewPillText: {
+    color: COLORS.primary,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
 
   summaryStrip: {

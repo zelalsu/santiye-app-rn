@@ -12,15 +12,18 @@ import {
 } from "@/config/projectAccess";
 import { COLORS } from "@/constants/theme";
 import { COST_ITEMS } from "@/data/CostItems";
-import { auth, db } from "@/firebaseConfig";
+import { auth, db, storage } from "@/firebaseConfig";
 import { ProjectRole } from "@/types/projects";
+import { useProEntitlement } from "@/hooks/useProEntitlement";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import DateTimePicker, {
   DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
+import { Image } from "expo-image";
 import * as FileSystem from "expo-file-system/legacy";
+import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
 import {
   addDoc,
@@ -35,11 +38,13 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -72,6 +77,8 @@ interface DailyLog {
   measurementItemLabel?: string;
   approvalStatus?: "pending" | "approved" | "rejected" | "not_required";
   approvedBy?: string;
+  photoUrl?: string;
+  photoPath?: string;
   source?: "dailyLogs" | "siteLogs";
 }
 
@@ -130,6 +137,7 @@ export default function DailyScreen() {
     "pdf-share" | "pdf-archive" | "excel-share" | "excel-archive" | null
   >(null);
   const [projectName, setProjectName] = useState("Şantiye");
+  const { isPro, loading: proLoading } = useProEntitlement(projectOwnerId);
   const [date, setDate] = useState(toDateKey(new Date()));
   const [workArea, setWorkArea] = useState("");
   const [workType, setWorkType] = useState("Beton");
@@ -144,6 +152,11 @@ export default function DailyScreen() {
   const [measurementItemLabel, setMeasurementItemLabel] = useState("");
   const [customMeasurementItem, setCustomMeasurementItem] = useState(false);
   const [editingLog, setEditingLog] = useState<DailyLog | null>(null);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
+  const [existingPhotoPath, setExistingPhotoPath] = useState<string | null>(null);
+  const [removeExistingPhoto, setRemoveExistingPhoto] = useState(false);
+  const [viewingPhoto, setViewingPhoto] = useState<string | null>(null);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const availableDailyUnits = measurementCategoryId
     ? CATEGORY_CONFIG[measurementCategoryId]?.units ??
@@ -284,6 +297,10 @@ export default function DailyScreen() {
     setMeasurementCategoryId("");
     setMeasurementItemLabel("");
     setCustomMeasurementItem(false);
+    setPhotoUri(null);
+    setExistingPhotoUrl(null);
+    setExistingPhotoPath(null);
+    setRemoveExistingPhoto(false);
   };
   const closeForm = () => {
     if (saving) return;
@@ -318,8 +335,91 @@ export default function DailyScreen() {
           (template) => template.label === log.measurementItemLabel,
         ),
     );
+    setPhotoUri(null);
+    setExistingPhotoUrl(log.photoUrl ?? null);
+    setExistingPhotoPath(log.photoPath ?? null);
+    setRemoveExistingPhoto(false);
     setActiveSection("flow");
     setShowForm(true);
+  };
+
+  const choosePhoto = () => {
+    Alert.alert("Saha Fotoğrafı", "Fotoğrafı nasıl eklemek istersiniz?", [
+      { text: "İptal", style: "cancel" },
+      { text: "Kamera", onPress: () => void pickPhoto("camera") },
+      { text: "Galeri", onPress: () => void pickPhoto("library") },
+    ]);
+  };
+
+  const pickPhoto = async (source: "camera" | "library") => {
+    try {
+      const permission =
+        source === "camera"
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (permission.status !== "granted") {
+        Alert.alert(
+          source === "camera" ? "Kamera İzni Gerekli" : "Fotoğraf İzni Gerekli",
+          "Günlük kaydına fotoğraf eklemek için cihaz ayarlarından erişim izni vermelisiniz.",
+          permission.canAskAgain
+            ? [{ text: "Tamam" }]
+            : [
+                { text: "Vazgeç", style: "cancel" },
+                { text: "Ayarları Aç", onPress: () => void Linking.openSettings() },
+              ],
+        );
+        return;
+      }
+
+      const result =
+        source === "camera"
+          ? await ImagePicker.launchCameraAsync({
+              mediaTypes: ["images"],
+              allowsEditing: false,
+              quality: 0.8,
+            })
+          : await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ["images"],
+              allowsEditing: false,
+              quality: 0.8,
+            });
+
+      if (!result.canceled && result.assets[0]) {
+        setPhotoUri(result.assets[0].uri);
+        setRemoveExistingPhoto(false);
+      }
+    } catch (error) {
+      console.error("Fotoğraf seçilemedi:", error);
+      Alert.alert(
+        "Fotoğraf açılamadı",
+        source === "camera" && Platform.OS === "ios"
+          ? "Simülatörde kamera kullanılamaz. Galeriden bir fotoğraf seçin veya gerçek cihazda kamerayı deneyin."
+          : "Fotoğraf kaynağı açılamadı. Lütfen tekrar deneyin.",
+      );
+    }
+  };
+
+  const removePhoto = () => {
+    setPhotoUri(null);
+    setRemoveExistingPhoto(!!existingPhotoUrl);
+  };
+
+  const uploadDailyPhoto = async () => {
+    if (!photoUri || !user) return null;
+
+    const photoPath = `users/${projectOwnerId}/projects/${projectId}/daily/photos/${Date.now()}_${user.uid}.jpg`;
+    const photoRef = ref(storage, photoPath);
+    const response = await fetch(photoUri);
+    const blob = await response.blob();
+    await uploadBytes(photoRef, blob, {
+      contentType: blob.type || "image/jpeg",
+    });
+
+    return {
+      photoPath,
+      photoUrl: await getDownloadURL(photoRef),
+    };
   };
   const onDateChange = (_event: DateTimePickerEvent, value?: Date) => {
     setShowCalendar(false);
@@ -336,7 +436,10 @@ export default function DailyScreen() {
     )
       return;
     setSaving(true);
+    let uploadedPhotoPath: string | null = null;
     try {
+      const uploadedPhoto = await uploadDailyPhoto();
+      uploadedPhotoPath = uploadedPhoto?.photoPath ?? null;
       const parsedQuantity = parseFloat(quantity.replace(",", ".")) || 0;
       const measurementCategory = MEASUREMENT_CATEGORIES.find(
         (item) => item.id === measurementCategoryId,
@@ -370,6 +473,10 @@ export default function DailyScreen() {
         );
         await updateDoc(logRef, {
           ...logData,
+          ...(uploadedPhoto || {}),
+          ...(removeExistingPhoto && !uploadedPhoto
+            ? { photoUrl: null, photoPath: null }
+            : {}),
           ...(editingLog.approvalStatus === "rejected" && {
             approvalStatus: "pending",
           }),
@@ -388,6 +495,7 @@ export default function DailyScreen() {
           ),
           {
             ...logData,
+            ...(uploadedPhoto || {}),
             approvalStatus: measurementCategory ? "pending" : "not_required",
             authorId: user.uid,
             authorName: user.displayName || user.email || "Ekip üyesi",
@@ -417,11 +525,25 @@ export default function DailyScreen() {
         }
         await recalculateProjectTotal(projectOwnerId, projectId);
       }
+      if (
+        existingPhotoPath &&
+        (removeExistingPhoto || uploadedPhoto) &&
+        existingPhotoPath !== uploadedPhoto?.photoPath
+      ) {
+        await deleteObject(ref(storage, existingPhotoPath)).catch(
+          () => undefined,
+        );
+      }
       resetForm();
       setEditingLog(null);
       setShowForm(false);
       setActiveSection("flow");
     } catch (error) {
+      if (uploadedPhotoPath) {
+        await deleteObject(ref(storage, uploadedPhotoPath)).catch(
+          () => undefined,
+        );
+      }
       console.error("Günlük kaydedilemedi:", error);
       Alert.alert(
         editingLog ? "Kayıt güncellenemedi" : "Kayıt eklenemedi",
@@ -544,6 +666,11 @@ export default function DailyScreen() {
                   await deleteDoc(costRef).catch(() => undefined);
                   await recalculateProjectTotal(projectOwnerId, projectId);
                 }
+              }
+              if (log.photoPath) {
+                await deleteObject(ref(storage, log.photoPath)).catch(
+                  () => undefined,
+                );
               }
             } catch (error) {
               console.error("Günlük kaydı silinemedi:", error);
@@ -697,7 +824,7 @@ export default function DailyScreen() {
           `<tr><td>${index + 1}</td><td>${escapeHtml(log.workArea || "Genel saha")}</td><td>${escapeHtml(log.measurementItemLabel ? `${log.workType || ""} / ${log.measurementItemLabel}` : log.workType || "Saha kaydı")}</td><td>${escapeHtml(log.workDone)}</td><td>${log.quantity ? `${escapeHtml(log.quantity)} ${escapeHtml(log.unit)}` : "—"}</td><td>${escapeHtml(log.workerCount || 0)}</td><td>${escapeHtml(log.materials || "—")}</td><td>${escapeHtml(log.issues || "—")}</td><td>${escapeHtml(log.authorName || "—")}</td></tr>`,
       )
       .join("");
-    return `<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:28px}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033}h1{color:#1557a6;margin:0 0 4px}p{margin:3px 0;color:#526076}.summary{display:flex;gap:14px;margin:18px 0}.box{border:1px solid #dce5f0;border-radius:10px;padding:10px 14px}.box b{font-size:20px;color:#1557a6}table{width:100%;border-collapse:collapse;font-size:9px}th{background:#1557a6;color:#fff;padding:7px;text-align:left}td{border:1px solid #dce5f0;padding:7px;vertical-align:top}tr:nth-child(even){background:#f6f9fc}.footer{margin-top:18px;font-size:9px;color:#7a8798}</style></head><body><h1>${escapeHtml(projectName)}</h1><p>Günlük Saha Raporu • ${escapeHtml(formatDate(date))}</p><div class="summary"><div class="box"><b>${summary.records}</b><br>Kayıt</div><div class="box"><b>${summary.workers}</b><br>Personel</div><div class="box"><b>${summary.quantityRecords}</b><br>Miktarlı iş</div></div><table><thead><tr><th>#</th><th>Alan</th><th>İş türü</th><th>Yapılan iş</th><th>Miktar</th><th>Personel</th><th>Malzeme</th><th>Not</th><th>Kaydeden</th></tr></thead><tbody>${rows}</tbody></table><p class="footer">Şantiyen Cebinde ile ${escapeHtml(new Date().toLocaleString("tr-TR"))} tarihinde hazırlanmıştır.</p></body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:28px}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033}h1{color:#1557a6;margin:0 0 4px}p{margin:3px 0;color:#526076}.summary{display:flex;gap:14px;margin:18px 0}.box{border:1px solid #dce5f0;border-radius:10px;padding:10px 14px}.box b{font-size:20px;color:#1557a6}table{width:100%;border-collapse:collapse;font-size:9px}th{background:#1557a6;color:#fff;padding:7px;text-align:left}td{border:1px solid #dce5f0;padding:7px;vertical-align:top}tr:nth-child(even){background:#f6f9fc}.footer{margin-top:18px;font-size:9px;color:#7a8798}</style></head><body><h1>${escapeHtml(projectName)}</h1><p>Günlük Saha Raporu • ${escapeHtml(formatDate(date))}</p><div class="summary"><div class="box"><b>${summary.records}</b><br>Kayıt</div><div class="box"><b>${summary.workers}</b><br>Personel</div><div class="box"><b>${summary.quantityRecords}</b><br>Miktarlı iş</div></div><table><thead><tr><th>#</th><th>Alan</th><th>İş türü</th><th>Yapılan iş</th><th>Miktar</th><th>Personel</th><th>Malzeme</th><th>Not</th><th>Kaydeden</th></tr></thead><tbody>${rows}</tbody></table><p class="footer">Şantiye Pusula ile ${escapeHtml(new Date().toLocaleString("tr-TR"))} tarihinde hazırlanmıştır.</p></body></html>`;
   };
 
   const createPdf = async () => {
@@ -705,7 +832,17 @@ export default function DailyScreen() {
     return Print.printToFileAsync({ html: dailyReportHtml() });
   };
 
+  const openPro = () =>
+    router.push({
+      pathname: "/pro",
+      params: { projectId, ownerId: projectOwnerId, role, projectName },
+    } as never);
+
   const shareDailyPdf = async () => {
+    if (!isPro) {
+      openPro();
+      return;
+    }
     setReportBusy("pdf-share");
     try {
       const { uri } = await createPdf();
@@ -730,6 +867,10 @@ export default function DailyScreen() {
   };
 
   const archiveDailyPdf = async () => {
+    if (!isPro) {
+      openPro();
+      return;
+    }
     if (!projectId || !projectOwnerId) return;
     setReportBusy("pdf-archive");
     try {
@@ -846,6 +987,10 @@ export default function DailyScreen() {
   };
 
   const shareDailyExcel = async () => {
+    if (!isPro) {
+      openPro();
+      return;
+    }
     setReportBusy("excel-share");
     try {
       const { uri } = await createExcel();
@@ -872,6 +1017,10 @@ export default function DailyScreen() {
   };
 
   const archiveDailyExcel = async () => {
+    if (!isPro) {
+      openPro();
+      return;
+    }
     if (!projectId || !projectOwnerId) return;
     setReportBusy("excel-archive");
     try {
@@ -1265,6 +1414,83 @@ export default function DailyScreen() {
                   textAlignVertical="top"
                 />
               </Field>
+              <Field label="Saha fotoğrafı (isteğe bağlı)">
+                {photoUri || (existingPhotoUrl && !removeExistingPhoto) ? (
+                  <View style={styles.photoPreviewCard}>
+                    <TouchableOpacity
+                      activeOpacity={0.88}
+                      onPress={() =>
+                        setViewingPhoto(photoUri || existingPhotoUrl || null)
+                      }
+                      accessibilityRole="imagebutton"
+                      accessibilityLabel="Saha fotoğrafını tam ekranda görüntüle"
+                    >
+                      <Image
+                        source={{
+                          uri: photoUri || existingPhotoUrl || undefined,
+                        }}
+                        style={styles.photoPreview}
+                        contentFit="cover"
+                        transition={150}
+                      />
+                    </TouchableOpacity>
+                    <View style={styles.photoPreviewActions}>
+                      <TouchableOpacity
+                        style={styles.photoChangeButton}
+                        onPress={choosePhoto}
+                        accessibilityRole="button"
+                        accessibilityLabel="Saha fotoğrafını değiştir"
+                      >
+                        <MaterialCommunityIcons
+                          name="image-edit-outline"
+                          size={18}
+                          color={COLORS.primary}
+                        />
+                        <Text style={styles.photoChangeText}>Değiştir</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.photoRemoveButton}
+                        onPress={removePhoto}
+                        accessibilityRole="button"
+                        accessibilityLabel="Saha fotoğrafını kaldır"
+                      >
+                        <MaterialCommunityIcons
+                          name="trash-can-outline"
+                          size={18}
+                          color={COLORS.danger}
+                        />
+                        <Text style={styles.photoRemoveText}>Kaldır</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.photoPicker}
+                    onPress={choosePhoto}
+                    accessibilityRole="button"
+                    accessibilityLabel="Günlük kaydına saha fotoğrafı ekle"
+                  >
+                    <View style={styles.photoPickerIcon}>
+                      <MaterialCommunityIcons
+                        name="camera-plus-outline"
+                        size={24}
+                        color={COLORS.primary}
+                      />
+                    </View>
+                    <View style={styles.photoPickerCopy}>
+                      <Text style={styles.photoPickerTitle}>Fotoğraf ekle</Text>
+                      <Text style={styles.photoPickerSubtitle}>
+                        Kameradan çekin veya galeriden seçin
+                      </Text>
+                    </View>
+                    <MaterialCommunityIcons
+                      name="chevron-right"
+                      size={22}
+                      color={COLORS.textMuted}
+                    />
+                  </TouchableOpacity>
+                )}
+              </Field>
               <View style={styles.row}>
                 <Field label="Miktar" half>
                   <TextInput
@@ -1370,7 +1596,24 @@ export default function DailyScreen() {
             </View>
           )}
 
-          {canExportDaily(role) && !showForm && activeSection === "reports" && (
+          {canExportDaily(role) && !showForm && activeSection === "reports" && !proLoading && !isPro && (
+            <View style={styles.reportCard}>
+              <View style={styles.proReportLock}>
+                <View style={styles.proReportIcon}>
+                  <MaterialCommunityIcons name="lock-outline" size={25} color={COLORS.primary} />
+                </View>
+                <Text style={styles.proReportTitle}>Rapor dışa aktarma Pro özelliğidir</Text>
+                <Text style={styles.proReportDescription}>
+                  Günlük kayıtlarınızı PDF veya Excel olarak paylaşmak ve belgelere arşivlemek için Pro’ya geçin.
+                </Text>
+                <TouchableOpacity style={styles.proReportButton} onPress={openPro}>
+                  <Text style={styles.proReportButtonText}>Pro’yu incele</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {canExportDaily(role) && !showForm && activeSection === "reports" && isPro && (
             <View style={styles.reportCard}>
               <View style={styles.reportHeading}>
                 <View style={styles.reportIcon}>
@@ -1589,6 +1832,21 @@ export default function DailyScreen() {
                           </Text>
                         </View>
                       </View>
+                      {!!log.photoUrl && (
+                        <TouchableOpacity
+                          activeOpacity={0.88}
+                          onPress={() => setViewingPhoto(log.photoUrl ?? null)}
+                          accessibilityRole="imagebutton"
+                          accessibilityLabel="Saha fotoğrafını tam ekranda görüntüle"
+                        >
+                          <Image
+                            source={{ uri: log.photoUrl }}
+                            style={styles.logPhoto}
+                            contentFit="cover"
+                            transition={150}
+                          />
+                        </TouchableOpacity>
+                      )}
                       <View style={styles.logTop}>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.logArea}>
@@ -1752,6 +2010,38 @@ export default function DailyScreen() {
           </TouchableOpacity>
         )}
       </KeyboardAvoidingView>
+      <Modal
+        visible={!!viewingPhoto}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setViewingPhoto(null)}
+      >
+        <View style={styles.photoViewer}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setViewingPhoto(null)}
+            accessibilityLabel="Fotoğraf görüntüleyicisini kapat"
+          />
+          {!!viewingPhoto && (
+            <Image
+              source={{ uri: viewingPhoto }}
+              style={styles.photoViewerImage}
+              contentFit="contain"
+              transition={180}
+            />
+          )}
+          <TouchableOpacity
+            style={styles.photoViewerClose}
+            onPress={() => setViewingPhoto(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Tam ekran fotoğrafı kapat"
+          >
+            <MaterialCommunityIcons name="close" size={26} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </Modal>
       <Modal
         visible={showUnitPicker}
         transparent
@@ -2023,6 +2313,83 @@ const styles = StyleSheet.create({
   },
   textArea: { minHeight: 82 },
   smallArea: { minHeight: 58 },
+  photoPicker: {
+    minHeight: 76,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: COLORS.inputBg,
+  },
+  photoPickerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primaryLight,
+  },
+  photoPickerCopy: { flex: 1, gap: 3 },
+  photoPickerTitle: { color: COLORS.text, fontSize: 14, fontWeight: "800" },
+  photoPickerSubtitle: { color: COLORS.textSecondary, fontSize: 12 },
+  photoPreviewCard: {
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: 15,
+    overflow: "hidden",
+    backgroundColor: COLORS.inputBg,
+  },
+  photoPreview: { width: "100%", height: 180, backgroundColor: COLORS.borderLight },
+  photoPreviewActions: { flexDirection: "row", gap: 8, padding: 10 },
+  photoChangeButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: COLORS.primaryLight,
+  },
+  photoChangeText: { color: COLORS.primary, fontSize: 12, fontWeight: "800" },
+  photoRemoveButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: COLORS.dangerBg,
+  },
+  photoRemoveText: { color: COLORS.danger, fontSize: 12, fontWeight: "800" },
+  photoViewer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.94)",
+  },
+  photoViewerImage: {
+    width: "100%",
+    height: "82%",
+  },
+  photoViewerClose: {
+    position: "absolute",
+    top: 54,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.25)",
+  },
   row: { flexDirection: "row", gap: 10 },
   half: { flex: 1 },
   chipRow: { gap: 7, paddingBottom: 13 },
@@ -2199,6 +2566,39 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderLight,
     padding: 16,
   },
+  proReportLock: { alignItems: "center", paddingVertical: 8 },
+  proReportIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  proReportTitle: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  proReportDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    marginTop: 6,
+  },
+  proReportButton: {
+    minHeight: 44,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    marginTop: 15,
+  },
+  proReportButtonText: { color: COLORS.white, fontSize: 14, fontWeight: "900" },
   reportHeading: { flexDirection: "row", alignItems: "center", gap: 11 },
   reportIcon: {
     width: 42,
@@ -2347,6 +2747,13 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderLight,
     padding: 15,
     marginBottom: 10,
+  },
+  logPhoto: {
+    width: "100%",
+    height: 180,
+    borderRadius: 14,
+    marginBottom: 13,
+    backgroundColor: COLORS.borderLight,
   },
   logTop: {
     flexDirection: "row",

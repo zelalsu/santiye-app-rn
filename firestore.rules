@@ -28,8 +28,13 @@ service cloud.firestore {
       return isManager(ownerId, projectId);
     }
     function hasContractorPro(ownerId, projectId) {
-      return exists(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/subscriptions/contractorPro)
-        && get(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/subscriptions/contractorPro).data.active == true;
+      return (
+        exists(/databases/$(database)/documents/users/$(ownerId)/entitlements/pro)
+        && get(/databases/$(database)/documents/users/$(ownerId)/entitlements/pro).data.active == true
+      ) || (
+        exists(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/subscriptions/contractorPro)
+        && get(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/subscriptions/contractorPro).data.active == true
+      );
     }
     function canReadDocuments(ownerId, projectId) {
       return canManageDocuments(ownerId, projectId) || isOffice(ownerId, projectId);
@@ -45,6 +50,11 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read, write: if isOwner(userId);
+
+      match /entitlements/{entitlementId} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
 
       match /projectAccess/{accessId} {
         allow read, delete: if isOwner(userId);
@@ -78,7 +88,8 @@ service cloud.firestore {
             || (isChief(userId, projectId) && measurementId != "yevmiye");
         }
         match /pdfHistory/{document=**} {
-          allow read, write: if isManager(userId, projectId);
+          allow read: if isManager(userId, projectId);
+          allow write: if isManager(userId, projectId) && hasContractorPro(userId, projectId);
         }
         match /contractors/{document=**} {
           // Toplam maliyet hesaplanırken mevcut taşeron kayıtları da okunur.
@@ -120,7 +131,7 @@ service cloud.firestore {
                 "date", "workArea", "workType", "workDone", "quantity", "unit",
                 "workerCount", "materials", "issues", "measurementCategoryId",
                 "measurementCategoryTitle", "measurementItemLabel", "approvalStatus",
-                "updatedAt"
+                "photoUrl", "photoPath", "updatedAt"
               ]));
           allow delete: if isManager(userId, projectId)
             || (isWorker(userId, projectId) && resource.data.authorId == request.auth.uid);
@@ -131,11 +142,13 @@ service cloud.firestore {
 
         match /documentSections/{sectionId} {
           allow read: if canReadDocuments(userId, projectId);
-          allow write: if canManageDocuments(userId, projectId);
+          allow write: if canManageDocuments(userId, projectId)
+            && (sectionId != "daily-reports" || hasContractorPro(userId, projectId));
         }
         match /phases/{phaseId}/documents/{documentId} {
           allow read: if canReadDocuments(userId, projectId);
-          allow write: if canManageDocuments(userId, projectId);
+          allow write: if canManageDocuments(userId, projectId)
+            && (phaseId != "daily-reports" || hasContractorPro(userId, projectId));
         }
       }
     }

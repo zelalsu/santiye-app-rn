@@ -19,6 +19,23 @@ service firebase.storage {
     function canWriteDocuments(ownerId, projectId) {
       return signedIn() && (request.auth.uid == ownerId || hasDocumentWriteRole(ownerId, projectId));
     }
+    function isProjectMember(ownerId, projectId) {
+      return signedIn() && (
+        request.auth.uid == ownerId || firestore.exists(memberPath(ownerId, projectId))
+      );
+    }
+    function canWriteDailyPhoto(ownerId, projectId) {
+      return signedIn() && (
+        request.auth.uid == ownerId || (
+          firestore.exists(memberPath(ownerId, projectId))
+          && firestore.get(memberPath(ownerId, projectId)).data.role in ["owner", "manager", "chief", "field"]
+        )
+      );
+    }
+    match /users/{ownerId}/projects/{projectId}/daily/photos/{fileName} {
+      allow read: if isProjectMember(ownerId, projectId);
+      allow write: if canWriteDailyPhoto(ownerId, projectId);
+    }
     match /users/{ownerId}/projects/{projectId}/{allPaths=**} {
       allow read: if canReadDocuments(ownerId, projectId);
       allow write: if canWriteDocuments(ownerId, projectId);

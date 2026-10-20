@@ -54,7 +54,7 @@ export default function Header({
         )}
 
         <View style={styles.headerMainText}>
-          <Text style={styles.headerMainSub}>Şantiyen Cebinde</Text>
+          <Text style={styles.headerMainSub}>Şantiye Pusula</Text>
           <Text style={styles.headerMainTitle}>{title}</Text>
           {subtitle && <Text style={styles.headerMainMeta}>{subtitle}</Text>}
         </View>

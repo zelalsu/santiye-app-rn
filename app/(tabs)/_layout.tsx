@@ -23,6 +23,7 @@ export default function TabLayout() {
 
   return (
     <Tabs
+      initialRouteName="daily"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: isDark ? "#69A7F5" : COLORS.primary,
@@ -54,22 +55,22 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
-        options={{
-          href: role && canUseMeasurements(role) ? undefined : null,
-          title: role === "chief" ? "Metraj" : "Ana Sayfa",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="daily"
         options={{
           href: role && canUseDaily(role) ? undefined : null,
           title: "Günlük",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="index"
+        options={{
+          href: role && canUseMeasurements(role) ? undefined : null,
+          title: role === "chief" ? "Metraj" : "Özet",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="grid" size={size} color={color} />
           ),
         }}
       />

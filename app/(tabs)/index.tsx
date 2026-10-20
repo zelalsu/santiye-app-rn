@@ -23,6 +23,7 @@ export default function HomeScreen() {
   const [activeProject, setActiveProject] = useState<{
     id: string;
     ownerId: string;
+    name: string;
   } | null>(null);
   const [categoryTotals, setCategoryTotals] = useState<Record<string, number>>(
     {},
@@ -34,7 +35,11 @@ export default function HomeScreen() {
   useEffect(() => {
     loadActiveProject().then((active) => {
       setRole(active.role);
-      setActiveProject({ id: active.id, ownerId: active.ownerId });
+      setActiveProject({
+        id: active.id,
+        ownerId: active.ownerId,
+        name: active.name,
+      });
     });
   }, []);
 
@@ -122,6 +127,7 @@ export default function HomeScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
       <Header
         title={showCosts ? "Proje Maliyeti" : "Proje Metrajı"}
+        subtitle={activeProject?.name || undefined}
         accountIcon
         leftMenuIcon
       />

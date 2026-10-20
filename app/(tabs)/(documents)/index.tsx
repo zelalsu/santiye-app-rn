@@ -5,8 +5,10 @@ import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { PhaseInfo } from "@/types/phases";
 import { Ionicons } from "@expo/vector-icons";
+import { useIsFocused } from "@react-navigation/native";
 import { canManageDocuments, canSeeCosts, canUseDocuments, loadActiveProject } from "@/config/projectAccess";
 import { ProjectRole } from "@/types/projects";
+import { useProEntitlement } from "@/hooks/useProEntitlement";
 import { router } from "expo-router";
 import {
   collection,
@@ -53,18 +55,12 @@ const DEFAULT_SECTIONS: Omit<DocumentSection, "docCount" | "completedCount">[] =
     iconPack: "MaterialCommunityIcons",
     order: 1,
   },
-  {
-    id: "other",
-    title: "Diğer Belgeler",
-    iconName: "folder-outline",
-    iconPack: "Ionicons",
-    order: 2,
-  },
 ];
 
 const LEGACY_SECTION_IDS = ["1", "2", "3", "4", "5", "6"];
 
 export default function DocumentsScreen() {
+  const isFocused = useIsFocused();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectOwnerId, setProjectOwnerId] = useState<string | null>(null);
   const [role, setRole] = useState<ProjectRole>("owner");
@@ -76,6 +72,7 @@ export default function DocumentsScreen() {
   );
   const [sectionTitle, setSectionTitle] = useState("");
   const [savingSection, setSavingSection] = useState(false);
+  const { isPro, loading: proLoading } = useProEntitlement(projectOwnerId);
 
   const user = auth.currentUser;
 
@@ -103,10 +100,10 @@ export default function DocumentsScreen() {
   }, []);
 
   useEffect(() => {
-    if (projectId && projectOwnerId && user) loadSections();
-    // loadSections aktif proje değiştiğinde yeniden çalıştırılır.
+    if (isFocused && projectId && projectOwnerId && user) loadSections();
+    // Belgeler sekmesine her dönüşte yeni arşivlenen raporları tekrar getir.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, projectOwnerId]);
+  }, [isFocused, projectId, projectOwnerId, role]);
 
   const loadSections = async () => {
     try {
@@ -124,13 +121,15 @@ export default function DocumentsScreen() {
         LEGACY_SECTION_IDS.includes(section.id),
       );
 
-      let sections = snapshot.docs.map((section) => ({
-        id: section.id,
-        title: section.data().title,
-        iconName: section.data().iconName ?? "folder-outline",
-        iconPack: section.data().iconPack ?? "Ionicons",
-        order: section.data().order ?? 0,
-      })) as Omit<DocumentSection, "docCount" | "completedCount">[];
+      let sections = snapshot.docs
+        .filter((section) => section.id !== "other")
+        .map((section) => ({
+          id: section.id,
+          title: section.data().title,
+          iconName: section.data().iconName ?? "folder-outline",
+          iconPack: section.data().iconPack ?? "Ionicons",
+          order: section.data().order ?? 0,
+        })) as Omit<DocumentSection, "docCount" | "completedCount">[];
 
       if (sections.length === 0) {
         sections = DEFAULT_SECTIONS;
@@ -391,16 +390,21 @@ export default function DocumentsScreen() {
                 accessibilityLabel="Proje maliyet raporunu aç"
                 style={styles.reportCard}
                 activeOpacity={0.75}
-                onPress={() =>
+                onPress={() => {
+                  if (proLoading) return;
+                  if (!isPro) {
+                    router.push({
+                      pathname: "/pro",
+                      params: { projectId, ownerId: projectOwnerId, role },
+                    } as never);
+                    return;
+                  }
                   router.push({
                     pathname: "/projectSummary",
-                    params: {
-                      projectId,
-                      ownerId: projectOwnerId,
-                      reportMode: "true",
-                    },
-                  })
-                }
+                    params: { projectId, ownerId: projectOwnerId, reportMode: "true" },
+                  });
+                }}
+                disabled={proLoading}
               >
                 <View style={styles.reportIconWrap}>
                   <Ionicons name="document-text-outline" size={24} color="#D33B32" />
@@ -409,7 +413,11 @@ export default function DocumentsScreen() {
                   <Text style={styles.reportTitle}>Proje Maliyet Raporu</Text>
                   <Text style={styles.reportDescription}>Güncel maliyetleri PDF olarak oluşturun ve paylaşın</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+                <Ionicons
+                  name={isPro ? "chevron-forward" : "lock-closed-outline"}
+                  size={20}
+                  color={isPro ? COLORS.textMuted : COLORS.primary}
+                />
               </TouchableOpacity>
             </>
           )}

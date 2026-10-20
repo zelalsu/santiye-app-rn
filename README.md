@@ -1,9 +1,9 @@
-# Şantiyen Cebinde
+# Şantiye Pusula
 
 Şantiye projelerini, maliyetleri, günlük kayıtları, taşeronları ve belgeleri tek yerden yönetmek için geliştirilmiş mobil uygulama.
 
 <p align="center">
-  <img src="assets/images/splash-brand.png" alt="Şantiyen Cebinde logosu" width="180" />
+  <img src="assets/images/splash-brand.png" alt="Şantiye Pusula logosu" width="180" />
 </p>
 
 ## Neler yapabilirsiniz?

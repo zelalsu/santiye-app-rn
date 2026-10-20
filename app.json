@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Şantiyen Cebinde",
+    "name": "Şantiye Pusula",
     "slug": "SantiyeApp",
     "version": "1.0.2",
     "orientation": "portrait",
@@ -16,7 +16,9 @@
       }
     },
     "android": {
-      "blockedPermissions": ["android.permission.RECORD_AUDIO"],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -24,6 +26,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
       "package": "com.zelalsu.SantiyeApp"
     },
@@ -68,6 +71,12 @@
       "eas": {
         "projectId": "207c2c2b-c97f-45de-91ce-a31050d89c03"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/207c2c2b-c97f-45de-91ce-a31050d89c03"
     }
   }
 }

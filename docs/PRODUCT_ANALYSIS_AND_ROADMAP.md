@@ -1,4 +1,4 @@
-# Şantiyen Cebinde - Ürün, UX ve Teknik Analiz Raporu
+# Şantiye Pusula - Ürün, UX ve Teknik Analiz Raporu
 
 Bu rapor, repository içindeki mevcut Expo/React Native kod tabanı incelenerek hazırlanmıştır. Uygulama bugün tam kapsamlı bir şantiye yönetim platformundan çok, proje bazlı maliyet hesaplama, belge checklist/yükleme ve PDF raporlama odaklı bir MVP durumundadır.
 

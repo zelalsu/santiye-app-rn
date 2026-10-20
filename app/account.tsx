@@ -1,5 +1,5 @@
 import Header from "@/components/Header";
-import { clearActiveProject } from "@/config/projectAccess";
+import { clearActiveProject, loadActiveProject } from "@/config/projectAccess";
 import { COLORS } from "@/constants/theme";
 import { auth, db, storage } from "@/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
@@ -206,6 +206,36 @@ export default function AccountScreen() {
         </View>
 
         <Text style={styles.sectionLabel}>GENEL</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Şantiye Pusula Pro ekranını aç"
+          style={styles.action}
+          onPress={async () => {
+            const active = await loadActiveProject();
+            if (!active.id || !active.ownerId) {
+              Alert.alert("Şantiye gerekli", "Pro özelliklerini görmek için önce bir şantiye seçin.");
+              return;
+            }
+            router.push({
+              pathname: "/pro",
+              params: {
+                projectId: active.id,
+                ownerId: active.ownerId,
+                role: active.role,
+                projectName: active.name,
+              },
+            } as never);
+          }}
+        >
+          <Ionicons name="sparkles-outline" size={22} color={COLORS.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.actionTitle}>Şantiye Pusula Pro</Text>
+            <Text style={styles.actionDescription}>
+              Pro özelliklerini ve abonelik seçeneklerini inceleyin.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={19} color={COLORS.textMuted} />
+        </Pressable>
         <Pressable
           accessibilityRole="link"
           accessibilityLabel="Gizlilik politikasını aç"

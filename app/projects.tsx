@@ -35,6 +35,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function ProjectsScreen() {
   const [user, setUser] = useState(auth.currentUser);
@@ -46,6 +47,7 @@ export default function ProjectsScreen() {
   const [inviteCode, setInviteCode] = useState("");
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
+  const [isPro, setIsPro] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const router = useRouter();
 
@@ -119,6 +121,23 @@ export default function ProjectsScreen() {
       unsubShared();
     };
   }, [user]); // ✅ user değişince listener yeniden kurulur
+
+  useEffect(() => {
+    if (!user) {
+      setIsPro(false);
+      return;
+    }
+    return onSnapshot(
+      doc(db, "users", user.uid, "entitlements", "pro"),
+      (snapshot) => setIsPro(snapshot.data()?.active === true),
+      (error) => {
+        if (error.code !== "permission-denied") {
+          console.error("Pro üyeliği alınamadı:", error);
+        }
+        setIsPro(false);
+      },
+    );
+  }, [user]);
   const handleAdd = async () => {
     if (!newName.trim() || !user) return;
     setAdding(true);
@@ -145,6 +164,30 @@ export default function ProjectsScreen() {
           role: "owner",
           joinedAt: serverTimestamp(),
         });
+        const projectName = newName.trim();
+        await saveActiveProject({
+          id: projectRef.id,
+          ownerId: user.uid,
+          role: "owner",
+          name: projectName,
+        });
+        const hasSeenProIntro = await AsyncStorage.getItem("hasSeenProIntro");
+        if (hasSeenProIntro !== "true") {
+          setNewName("");
+          setEditingProject(null);
+          setModalVisible(false);
+          router.push({
+            pathname: "/pro",
+            params: {
+              projectId: projectRef.id,
+              ownerId: user.uid,
+              role: "owner",
+              projectName,
+              intro: "1",
+            },
+          } as never);
+          return;
+        }
       }
       setNewName("");
       setEditingProject(null);
@@ -249,6 +292,20 @@ export default function ProjectsScreen() {
   };
 
   const openCreateModal = () => {
+    const ownedProjects = projects.filter((project) => !project.shared);
+    if (!isPro && ownedProjects.length >= 1) {
+      const project = ownedProjects[0];
+      router.push({
+        pathname: "/pro",
+        params: {
+          projectId: project.id,
+          ownerId: project.ownerId ?? user?.uid,
+          role: "owner",
+          projectName: project.name,
+        },
+      } as never);
+      return;
+    }
     setEditingProject(null);
     setNewName("");
     setModalVisible(true);
@@ -385,9 +442,8 @@ export default function ProjectsScreen() {
                   role,
                   name: item.name,
                 });
-                const pathname = role === "office" ? "/(tabs)/daily" : "/(tabs)";
                 router.replace({
-                  pathname,
+                  pathname: "/(tabs)/daily",
                   params: {
                     projectId: item.id,
                     ownerId,
@@ -436,7 +492,8 @@ export default function ProjectsScreen() {
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={0}
         >
           <TouchableOpacity style={{ flex: 1 }} onPress={closeModal} />
           <View style={styles.modalSheet}>
@@ -525,7 +582,8 @@ export default function ProjectsScreen() {
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={0}
         >
           <TouchableOpacity
             style={{ flex: 1 }}

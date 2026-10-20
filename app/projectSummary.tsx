@@ -3,6 +3,7 @@ import PdfHistoryModal from "@/components/PdfHistoryModal";
 import { COLORS } from "@/constants/theme";
 import { auth, db } from "@/firebaseConfig";
 import { canSeeCosts, loadActiveProject } from "@/config/projectAccess";
+import { useProEntitlement } from "@/hooks/useProEntitlement";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { copyAsync, documentDirectory } from "expo-file-system/legacy";
 import * as Print from "expo-print";
@@ -61,6 +62,7 @@ export default function ProjectSummaryScreen() {
   const [pdfPreviewVisible, setPdfPreviewVisible] = useState(false);
   const [pdfUri, setPdfUri] = useState<string | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const { isPro, loading: proLoading } = useProEntitlement(projectOwnerId);
 
   useEffect(() => {
     loadActiveProject().then((active) => {
@@ -77,6 +79,14 @@ export default function ProjectSummaryScreen() {
     if (hasCostAccess === true && projectOwnerId) loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasCostAccess, projectOwnerId]);
+
+  useEffect(() => {
+    if (!reportMode || proLoading || isPro || !projectOwnerId) return;
+    router.replace({
+      pathname: "/pro",
+      params: { projectId, ownerId: projectOwnerId, projectName },
+    } as never);
+  }, [isPro, proLoading, projectId, projectName, projectOwnerId, reportMode]);
 
   const loadData = async () => {
     try {
@@ -234,6 +244,13 @@ export default function ProjectSummaryScreen() {
   // ─── PDF oluştur → önizleme aç ───────────────────────────────────────────────
 
   const handleGenerateAndPreview = async () => {
+    if (reportMode && !isPro) {
+      router.replace({
+        pathname: "/pro",
+        params: { projectId, ownerId: projectOwnerId, projectName },
+      } as never);
+      return;
+    }
     if (categories.length === 0 && contractors.length === 0) {
       Alert.alert("Veri Yok", "PDF oluşturmak için önce kalem ekleyin.");
       return;
@@ -292,7 +309,7 @@ export default function ProjectSummaryScreen() {
 
   // ─── Yükleniyor ──────────────────────────────────────────────────────────────
 
-  if (hasCostAccess !== true || loading) {
+  if (hasCostAccess !== true || loading || (reportMode && proLoading)) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />

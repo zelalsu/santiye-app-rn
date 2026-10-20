@@ -28,6 +28,7 @@ export default function RootLayout() {
         />
         <Stack.Screen name="projects" options={{ headerShown: false }} />
         <Stack.Screen name="account" options={{ headerShown: false }} />
+        <Stack.Screen name="pro" options={{ headerShown: false }} />
         <Stack.Screen name="project-team" options={{ headerShown: false }} />
         <Stack.Screen
           name="projectSummary"

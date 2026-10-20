@@ -58,7 +58,7 @@ export default function OnboardingScreen() {
               source={require("../assets/images/splash-brand.png")}
               style={styles.logo}
             />
-            <Text style={styles.brand}>Şantiyen Cebinde</Text>
+            <Text style={styles.brand}>Şantiye Pusula</Text>
           </View>
           {!isLast && (
             <Pressable accessibilityRole="button" onPress={finish} hitSlop={12}>

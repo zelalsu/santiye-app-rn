@@ -115,7 +115,7 @@ export default function LoginScreen() {
               style={styles.logo}
             />
 
-            <Text style={styles.appName}>Şantiyen Cebinde</Text>
+            <Text style={styles.appName}>Şantiye Pusula</Text>
           </View>
 
           {/* Kart */}

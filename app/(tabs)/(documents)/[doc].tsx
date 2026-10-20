@@ -61,6 +61,9 @@ export default function DocumentDetailScreen() {
   const phaseId = Array.isArray(params.phaseId)
     ? params.phaseId[0]
     : params.phaseId;
+  const phaseTitle = Array.isArray(params.phaseTitle)
+    ? params.phaseTitle[0]
+    : params.phaseTitle;
   const projectId = Array.isArray(params.projectId)
     ? params.projectId[0]
     : params.projectId;
@@ -516,9 +519,8 @@ export default function DocumentDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── DİĞER BELGELER ── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Diğer Belgeler</Text>
+          <Text style={styles.sectionTitle}>{phaseTitle || "Belgeler"}</Text>
           {freeDocs.length === 0 ? (
             <View style={styles.emptyWrap}>
               <MaterialCommunityIcons
